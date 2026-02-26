@@ -43,7 +43,8 @@ WALL_CONFIG = (
 DEFAULT_MODIFIER = (
     "MODIFIER:(EYEPATCH = None, MIRROR = False, CONTROLLEROFFSET = 0.0, "
     "PRISM = 0.0, HIDEWALL = None, HIDEWALLAMOUNT = 0.5, GEOMETRICMIRROR = False, "
-    "MAINCONTROLLER = Right, MOTORSPACE = Medium)"
+    "MAINCONTROLLER = Right, MOTORSPACE = Medium, "
+    "PERFORMANCEFEEDBACK = None, JUDGEMENT = None)"
 )
 
 # Segment ID encoding: PPCCMMTT
@@ -176,6 +177,9 @@ def build_wampat(participant: str, condition: str, metric: str,
         "// --- Initial Wait ---",
         f"MESSAGE:(LABEL = Session_{condition}_{metric}_Start, TIME = 3)",
         "WAIT:(TIME = 5)",
+        "",
+        f"// --- Study condition: {condition} | Metric: {metric} ---",
+        f"MODIFIER:(PERFORMANCEFEEDBACK = {FEEDBACK_TYPE_MAP.get(condition, 'None')}, JUDGEMENT = {metric})",
         "",
         build_phase_block(participant, condition, metric, "Baseline", baseline),
         "",
