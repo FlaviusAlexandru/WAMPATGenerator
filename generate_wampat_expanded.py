@@ -110,32 +110,35 @@ FEEDBACK_TYPE_MAP = {
 # ---------------------------------------------------------------------------
 
 def build_phase_block(participant: str, condition: str, metric: str,
-                     phase_name: str, sequence: str) -> str:
+                     phase_name: str, sequence: str, is_baseline: bool = False) -> str:
     """Returns the WAMPAT text for one phase (e.g. Baseline with sequence 'AC')."""
     segment_id = generate_segment_id(participant, condition, metric, phase_name)
     feedback_type = FEEDBACK_TYPE_MAP.get(condition, "Operation")
     
     lines = [
         f"// ============ Phase: {phase_name} (sequence: {sequence}) ============",
-        f"SEGMENT:(ID = {segment_id}, LABEL = {condition}_{metric}_{phase_name})",
+        f"SEGMENT:(ID = {segment_id}, LABEL = {phase_name})",
     ]
-    
-    
+        # Set performance feedback and judgement parameters per phase
+    if is_baseline:
+        lines.append("MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = None)")
+    else:
+        lines.append(f"MODIFIER:(PERFORMANCEFEEDBACK = {feedback_type}, JUDGEMENT = {metric})")    
     # Add phase-specific instructions
     if phase_name == "Baseline":
-        lines.append(f"MESSAGE:(LABEL = Baseline_Phase_Begin, TIME = 3)")
+        lines.append("MESSAGE:(LABEL = Get_Ready.., TIME = 3)")
         lines.append("WAIT:(TIME = 4)")
     elif phase_name == "Explore":
-        lines.append(f"MESSAGE:(LABEL = Explore_With_Feedback, TIME = 3)")
+        lines.append("MESSAGE:(LABEL = Explore_The_Feedback, TIME = 3)")
         lines.append("WAIT:(TIME = 4)")
     elif phase_name == "BestPerf":
-        lines.append(f"MESSAGE:(LABEL = Perform_Your_Best, TIME = 3)")
+        lines.append("MESSAGE:(LABEL = Obtain_The_Best_Feedback_Possible, TIME = 3)")
         lines.append("WAIT:(TIME = 4)")
     elif phase_name == "Instructed":
-        lines.append(f"MESSAGE:(LABEL = Follow_Instructions, TIME = 3)")
+        lines.append("MESSAGE:(LABEL = Follow_Performance_Instructions, TIME = 3)")
         lines.append("WAIT:(TIME = 4)")
     
-    # Add pattern blocks
+    # Add pattern blocks with feedback after each (for non-Baseline)
     for char in sequence:
         block = PATTERN_BLOCKS.get(char.upper())
         if block is None:
@@ -143,17 +146,21 @@ def build_phase_block(participant: str, condition: str, metric: str,
             continue
         lines.append(f"// --- Pattern Block {char.upper()} ---")
         lines.append(block)
+        
+        # Show task feedback after each pattern block (for non-Baseline phases)
+        if not is_baseline:
+            lines.append("FEEDBACK:(TIME = 10)")
+            lines.append("WAIT:(TIME = 10)")
     
-    # Add calibration mole and feedback display (for non-Baseline phases)
-    if phase_name != "Baseline":
-        lines.append("// --- Calibration Point ---")
-        lines.append(f"SEGMENT:(ID = {segment_id}99, LABEL = Calibration_{phase_name})")
-        lines.append("MOLE:(X = 5, Y = 3, LIFETIME = 5) // Center calibration")
-        lines.append("WAIT:(HIT)")
-        lines.append("// --- Show Performance Feedback ---")
-        lines.append("FEEDBACK:(TIME = 10)")
-        lines.append("WAIT:(TIME = 10)")
-        lines.append(f"MESSAGE:(LABEL = Feedback_Question_{metric}, TIME = 1)")
+    # Add calibration point (for all phases)
+    lines.append("// --- Calibration Point ---")
+    lines.append(f"SEGMENT:(ID = {segment_id}99, LABEL = Calibration_Point)")
+    lines.append("MOLE:(X = 5, Y = 3, LIFETIME = 5) // Center calibration")
+    lines.append("WAIT:(HIT)")
+    
+    # Add feedback question for non-Baseline phases
+    if not is_baseline:
+        lines.append("MESSAGE:(LABEL = Questions.., TIME = 3)")
         lines.append("WAIT:(TIME = 3)")
     
     lines.append(f"// ============ End of {phase_name} ============")
@@ -179,24 +186,23 @@ def build_wampat(participant: str, condition: str, metric: str,
         "WAIT:(TIME = 5)",
         "",
         f"// --- Study condition: {condition} | Metric: {metric} ---",
-        f"MODIFIER:(PERFORMANCEFEEDBACK = {FEEDBACK_TYPE_MAP.get(condition, 'None')}, JUDGEMENT = {metric})",
         "",
-        build_phase_block(participant, condition, metric, "Baseline", baseline),
+        build_phase_block(participant, condition, metric, "Baseline", baseline, is_baseline=True),
         "",
-        f"MESSAGE:(LABEL = Baseline_Complete, TIME = 2)",
+        "MESSAGE:(LABEL = Baseline_Completed, TIME = 2)",
         "WAIT:(TIME = 3)",
         "",
-        build_phase_block(participant, condition, metric, "Explore", explore),
+        build_phase_block(participant, condition, metric, "Explore", explore, is_baseline=False),
         "",
-        f"MESSAGE:(LABEL = Explore_Complete, TIME = 2)",
+        "MESSAGE:(LABEL = Exploration_Completed, TIME = 2)",
         "WAIT:(TIME = 3)",
         "",
-        build_phase_block(participant, condition, metric, "BestPerf", best_perf),
+        build_phase_block(participant, condition, metric, "BestPerf", best_perf, is_baseline=False),
         "",
-        f"MESSAGE:(LABEL = BestPerf_Complete, TIME = 2)",
+        "MESSAGE:(LABEL = Best_Performance_Completed, TIME = 2)",
         "WAIT:(TIME = 3)",
         "",
-        build_phase_block(participant, condition, metric, "Instructed", instructed),
+        build_phase_block(participant, condition, metric, "Instructed", instructed, is_baseline=False),
         "",
         f"MESSAGE:(LABEL = Session_Complete, TIME = 3)",
         "WAIT:(TIME = 5)",
