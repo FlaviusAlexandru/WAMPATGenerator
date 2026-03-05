@@ -121,13 +121,14 @@ def build_phase_block(participant: str, condition: str, metric: str,
     ]
         # Set performance feedback and judgement parameters per phase
     if is_baseline:
-        lines.append("MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = None)")
+        lines.append(f"MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = {metric})")
     else:
         lines.append(f"MODIFIER:(PERFORMANCEFEEDBACK = {feedback_type}, JUDGEMENT = {metric})")    
     # Add phase-specific instructions
     if phase_name == "Baseline":
         lines.append("MESSAGE:(LABEL = Get_Ready.., TIME = 3)")
         lines.append("WAIT:(TIME = 4)")
+        lines.append("CALIBRATION:(TYPE=PERFORMANCE, STATE=START)")
     elif phase_name == "Explore":
         lines.append("MESSAGE:(LABEL = Explore_The_Feedback, TIME = 3)")
         lines.append("WAIT:(TIME = 4)")
@@ -162,6 +163,10 @@ def build_phase_block(participant: str, condition: str, metric: str,
     if not is_baseline:
         lines.append("MESSAGE:(LABEL = Questions.., TIME = 3)")
         lines.append("WAIT:(TIME = 3)")
+    
+    # Add calibration end for Baseline phase
+    if is_baseline:
+        lines.append("CALIBRATION:(TYPE=PERFORMANCE, STATE=END)")
     
     lines.append(f"// ============ End of {phase_name} ============")
     lines.append("WAIT:(TIME = 2)")
