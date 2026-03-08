@@ -96,6 +96,13 @@ PATTERN_BLOCKS = {
     ]),
 }
 
+# Warmup pattern: starts and ends with center mole, random positions in between
+WARMUP_PATTERN = _mole_sequence([
+    (5, 3),  # Start: center
+    (1, 1), (9, 5), (3, 4), (7, 2), (2, 3), (8, 1), (4, 5), (6, 1),  # 8 random moles
+    (5, 3),  # End: center
+])
+
 VALID_CONDITIONS = {"OperationFB", "ActionFB", "TaskFB"}
 
 # Feedback type mapping based on condition
@@ -126,17 +133,17 @@ def build_phase_block(participant: str, condition: str, metric: str,
         lines.append(f"MODIFIER:(PERFORMANCEFEEDBACK = {feedback_type}, JUDGEMENT = {metric})")    
     # Add phase-specific instructions
     if phase_name == "Baseline":
-        lines.append("MESSAGE:(LABEL = Get_Ready.., TIME = 3)")
+        lines.append("MESSAGE:(LABEL = Get_Ready, TIME = 3)")
         lines.append("WAIT:(TIME = 4)")
         lines.append("CALIBRATION:(TYPE=PERFORMANCE, STATE=START)")
     elif phase_name == "Explore":
-        lines.append("MESSAGE:(LABEL = Explore_The_Feedback, TIME = 3)")
+        lines.append("MESSAGE:(LABEL = Explore_Feedback, TIME = 3)")
         lines.append("WAIT:(TIME = 4)")
     elif phase_name == "BestPerf":
-        lines.append("MESSAGE:(LABEL = Obtain_The_Best_Feedback_Possible, TIME = 3)")
+        lines.append("MESSAGE:(LABEL = Best_Performance, TIME = 3)")
         lines.append("WAIT:(TIME = 4)")
     elif phase_name == "Instructed":
-        lines.append("MESSAGE:(LABEL = Follow_Performance_Instructions, TIME = 3)")
+        lines.append("MESSAGE:(LABEL = Follow_Instructions, TIME = 3)")
         lines.append("WAIT:(TIME = 4)")
     
     # Add pattern blocks with feedback after each (for non-Baseline)
@@ -150,8 +157,8 @@ def build_phase_block(participant: str, condition: str, metric: str,
         
         # Show task feedback after each pattern block (for non-Baseline phases)
         if not is_baseline:
-            lines.append("FEEDBACK:(TIME = 10)")
-            lines.append("WAIT:(TIME = 10)")
+            lines.append("FEEDBACK:(TIME = 1)")
+            lines.append("WAIT:(TIME = 1)")
     
     # Add calibration point (for all phases)
     lines.append("// --- Calibration Point ---")
@@ -161,7 +168,7 @@ def build_phase_block(participant: str, condition: str, metric: str,
     
     # Add feedback question for non-Baseline phases
     if not is_baseline:
-        lines.append("MESSAGE:(LABEL = Questions.., TIME = 3)")
+        lines.append("MESSAGE:(LABEL = Questions, TIME = 3)")
         lines.append("WAIT:(TIME = 3)")
     
     # Add calibration end for Baseline phase
@@ -170,6 +177,24 @@ def build_phase_block(participant: str, condition: str, metric: str,
     
     lines.append(f"// ============ End of {phase_name} ============")
     lines.append("WAIT:(TIME = 2)")
+    return "\n".join(lines)
+
+
+def build_warmup_block(participant: str, condition: str, metric: str) -> str:
+    """Returns the warmup phase block with no feedback."""
+    segment_id = generate_segment_id(participant, condition, metric, "Baseline") + "W"  # W for warmup
+    
+    lines = [
+        "// ============ Warmup Phase ============",
+        f"SEGMENT:(ID = {segment_id}, LABEL = Warmup)",
+        f"MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = {metric})",
+        "MESSAGE:(LABEL = Warmup, TIME = 3)",
+        "WAIT:(TIME = 4)",
+        "// --- Warmup Pattern ---",
+        WARMUP_PATTERN,
+        "// ============ End of Warmup ============",
+        "WAIT:(TIME = 2)",
+    ]
     return "\n".join(lines)
 
 
@@ -187,29 +212,37 @@ def build_wampat(participant: str, condition: str, metric: str,
         DEFAULT_MODIFIER,
         "",
         "// --- Initial Wait ---",
-        f"MESSAGE:(LABEL = Session_{condition}_{metric}_Start, TIME = 3)",
+        "MESSAGE:(LABEL = Session_Start, TIME = 3)",
         "WAIT:(TIME = 5)",
         "",
         f"// --- Study condition: {condition} | Metric: {metric} ---",
         "",
+        build_warmup_block(participant, condition, metric),
+        "",
+        "MESSAGE:(LABEL = Warmup_Complete, TIME = 2)",
+        "WAIT:(TIME = 3)",
+        "",
         build_phase_block(participant, condition, metric, "Baseline", baseline, is_baseline=True),
         "",
-        "MESSAGE:(LABEL = Baseline_Completed, TIME = 2)",
+        "MESSAGE:(LABEL = Baseline_Complete, TIME = 2)",
         "WAIT:(TIME = 3)",
         "",
         build_phase_block(participant, condition, metric, "Explore", explore, is_baseline=False),
         "",
-        "MESSAGE:(LABEL = Exploration_Completed, TIME = 2)",
+        "MESSAGE:(LABEL = Explore_Complete, TIME = 2)",
         "WAIT:(TIME = 3)",
         "",
         build_phase_block(participant, condition, metric, "BestPerf", best_perf, is_baseline=False),
         "",
-        "MESSAGE:(LABEL = Best_Performance_Completed, TIME = 2)",
+        "MESSAGE:(LABEL = BestPerf_Complete, TIME = 2)",
         "WAIT:(TIME = 3)",
         "",
         build_phase_block(participant, condition, metric, "Instructed", instructed, is_baseline=False),
         "",
-        f"MESSAGE:(LABEL = Session_Complete, TIME = 3)",
+        "MESSAGE:(LABEL = Instructed_Complete, TIME = 2)",
+        "WAIT:(TIME = 3)",
+        "",
+        "MESSAGE:(LABEL = Session_Complete, TIME = 3)",
         "WAIT:(TIME = 5)",
     ]
     return "\n".join(sections) + "\n"
