@@ -155,10 +155,10 @@ def build_phase_block(participant: str, condition: str, metric: str,
         lines.append(f"// --- Pattern Block {char.upper()} ---")
         lines.append(block)
         
-        # Show task feedback after each pattern block (for non-Baseline phases)
-        if not is_baseline:
-            lines.append("FEEDBACK:(TIME = 1)")
-            lines.append("WAIT:(TIME = 1)")
+        # Show task feedback after each pattern block (only for TaskFB condition in non-Baseline phases)
+        if not is_baseline and condition == "TaskFB":
+            lines.append("FEEDBACK:(TIME = 10)")
+            lines.append("WAIT:(TIME = 10)")  # 10 seconds for task feedback animation to complete
     
     # Add calibration point (for all phases)
     lines.append("// --- Calibration Point ---")
@@ -307,19 +307,17 @@ class App(tk.Tk):
         self.resizable(True, True)
         self.minsize(560, 400)
 
-        pad = {"padx": 10, "pady": 6}
-
         # --- CSV row ---
-        tk.Label(self, text="Input CSV:", anchor="w").grid(row=0, column=0, sticky="w", **pad)
+        tk.Label(self, text="Input CSV:", anchor="w").grid(row=0, column=0, sticky="w", padx=10, pady=6)
         self.csv_var = tk.StringVar(value=DEFAULT_CSV)
-        tk.Entry(self, textvariable=self.csv_var, width=55).grid(row=0, column=1, sticky="ew", **pad)
-        tk.Button(self, text="Browse…", command=self._pick_csv).grid(row=0, column=2, **pad)
+        tk.Entry(self, textvariable=self.csv_var, width=55).grid(row=0, column=1, sticky="ew", padx=10, pady=6)
+        tk.Button(self, text="Browse…", command=self._pick_csv).grid(row=0, column=2, padx=10, pady=6)
 
         # --- Output dir row ---
-        tk.Label(self, text="Output folder:", anchor="w").grid(row=1, column=0, sticky="w", **pad)
+        tk.Label(self, text="Output folder:", anchor="w").grid(row=1, column=0, sticky="w", padx=10, pady=6)
         self.out_var = tk.StringVar(value=DEFAULT_OUT)
-        tk.Entry(self, textvariable=self.out_var, width=55).grid(row=1, column=1, sticky="ew", **pad)
-        tk.Button(self, text="Browse…", command=self._pick_out).grid(row=1, column=2, **pad)
+        tk.Entry(self, textvariable=self.out_var, width=55).grid(row=1, column=1, sticky="ew", padx=10, pady=6)
+        tk.Button(self, text="Browse…", command=self._pick_out).grid(row=1, column=2, padx=10, pady=6)
 
         # --- Generate button ---
         tk.Button(self, text="Generate .wampat files", command=self._run,
