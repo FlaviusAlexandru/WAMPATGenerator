@@ -44,7 +44,7 @@ DEFAULT_MODIFIER = (
     "MODIFIER:(EYEPATCH = None, MIRROR = False, CONTROLLEROFFSET = 0.0, "
     "PRISM = 0.0, HIDEWALL = None, HIDEWALLAMOUNT = 0.5, GEOMETRICMIRROR = False, "
     "MAINCONTROLLER = Right, MOTORSPACE = Medium, "
-    "PERFORMANCEFEEDBACK = None, JUDGEMENT = None)"
+    "PERFORMANCEFEEDBACK = None, JUDGEMENT = None, MOTORSPACEOOBSIGNIFICANT = None)"
 )
 
 # Segment ID encoding: PPCCMMTT
@@ -201,6 +201,9 @@ def build_warmup_block(participant: str, condition: str, metric: str) -> str:
 def build_wampat(participant: str, condition: str, metric: str,
                  baseline: str, explore: str, best_perf: str, instructed: str) -> str:
     """Returns the full content of one .wampat file."""
+    # Generate initial segment ID for this participant/condition/metric combo
+    init_segment_id = generate_segment_id(participant, condition, metric, "Baseline")
+    
     sections = [
         f"// ========================================",
         f"// Participant:        {participant}",
@@ -209,6 +212,7 @@ def build_wampat(participant: str, condition: str, metric: str,
         f"// ========================================",
         "",
         WALL_CONFIG,
+        f"SEGMENT:(ID = {init_segment_id}, LABEL = Warmup)",
         DEFAULT_MODIFIER,
         "",
         "// --- Initial Wait ---",
