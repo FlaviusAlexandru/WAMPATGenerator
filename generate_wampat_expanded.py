@@ -9,7 +9,7 @@ Study design: within-participant 3x3 factorial
   - 4 Phases per trial: Baseline, Explore, BestPerf, Instructed
 
 File naming: {Participant}_{Condition}_{Metric}.wampat
-  e.g. 1_OperationFB_Time.wampat
+  e.g. 1_OperationFB_Time.wampats
 
 CSV columns expected (0-indexed):
   0: Condition   1: Metric   2: Participant   3: Order
@@ -51,7 +51,7 @@ DEFAULT_MODIFIER = (
 # PP = Participant (01-99)
 # CC = Condition (10=Operation, 20=Action, 30=Task)
 # MM = Metric (11=Distance, 22=MaxSpeed, 33=Time)
-# TT = Phase (00=Baseline, 10=Explore, 20=BestPerf, 30=Instructed)
+# TT = Phase (00=Baseline, 10=Explore, 20=BestPerf, 30=Instructed, 40=Warmup)
 def generate_segment_id(participant: str, condition: str, metric: str, phase: str) -> str:
     """Generate a unique segment ID for logging/analysis."""
     pp = participant.zfill(2)
@@ -62,7 +62,7 @@ def generate_segment_id(participant: str, condition: str, metric: str, phase: st
     mm_map = {"Distance": "11", "MaxSpeed": "22", "Time": "33"}
     mm = mm_map.get(metric, "00")
     
-    tt_map = {"Baseline": "00", "Explore": "10", "BestPerf": "20", "Instructed": "30"}
+    tt_map = {"Baseline": "00", "Explore": "10", "BestPerf": "20", "Instructed": "30", "Warmup": "40"}
     tt = tt_map.get(phase, "00")
     
     return pp + cc + mm + tt
@@ -99,7 +99,7 @@ PATTERN_BLOCKS = {
 # Warmup pattern: starts and ends with center mole, random positions in between
 WARMUP_PATTERN = _mole_sequence([
     (5, 3),  # Start: center
-    (1, 1), (9, 5), (3, 4), (7, 2), (2, 3), (8, 1), (4, 5), (6, 1),  # 8 random moles
+    (2, 1), (8, 5), (3, 4), (7, 2), (2, 3), (8, 1), (4, 5), (6, 1),  # 8 random moles (no corner slots)
     (5, 3),  # End: center
 ])
 
@@ -128,9 +128,13 @@ def build_phase_block(participant: str, condition: str, metric: str,
     ]
         # Set performance feedback and judgement parameters per phase
     if is_baseline:
-        lines.append(f"MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = {metric})")
+        lines.append(
+            f"MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = {metric}, MOTORSPACEOOBSIGNIFICANT = None)"
+        )
     else:
-        lines.append(f"MODIFIER:(PERFORMANCEFEEDBACK = {feedback_type}, JUDGEMENT = {metric})")    
+        lines.append(
+            f"MODIFIER:(PERFORMANCEFEEDBACK = {feedback_type}, JUDGEMENT = {metric}, MOTORSPACEOOBSIGNIFICANT = None)"
+        )
     # Add phase-specific instructions
     if phase_name == "Baseline":
         lines.append("MESSAGE:(LABEL = Get_Ready, TIME = 3)")
@@ -182,12 +186,12 @@ def build_phase_block(participant: str, condition: str, metric: str,
 
 def build_warmup_block(participant: str, condition: str, metric: str) -> str:
     """Returns the warmup phase block with no feedback."""
-    segment_id = generate_segment_id(participant, condition, metric, "Baseline") + "W"  # W for warmup
+    segment_id = generate_segment_id(participant, condition, metric, "Warmup")
     
     lines = [
         "// ============ Warmup Phase ============",
         f"SEGMENT:(ID = {segment_id}, LABEL = Warmup)",
-        f"MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = {metric})",
+        f"MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = {metric}, MOTORSPACEOOBSIGNIFICANT = None)",
         "MESSAGE:(LABEL = Warmup, TIME = 3)",
         "WAIT:(TIME = 4)",
         "// --- Warmup Pattern ---",
@@ -202,7 +206,7 @@ def build_wampat(participant: str, condition: str, metric: str,
                  baseline: str, explore: str, best_perf: str, instructed: str) -> str:
     """Returns the full content of one .wampat file."""
     # Generate initial segment ID for this participant/condition/metric combo
-    init_segment_id = generate_segment_id(participant, condition, metric, "Baseline")
+    init_segment_id = generate_segment_id(participant, condition, metric, "Warmup")
     
     sections = [
         f"// ========================================",
