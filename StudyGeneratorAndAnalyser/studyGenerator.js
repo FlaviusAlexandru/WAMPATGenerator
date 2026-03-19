@@ -32,29 +32,34 @@ function generateHCIStudy() {
 
   // 2. BUILD DECKS FOR EACH METRIC ORDER
   let pools = { 
-    "TiDiSp": { base: [], best: [], inst: [] }, 
-    "DiSpTi": { base: [], best: [], inst: [] }, 
-    "SpTiDi": { base: [], best: [], inst: [] } 
+    "TiDiSp": { base: [], best: [], inst: [], nofbInst: [] }, 
+    "DiSpTi": { base: [], best: [], inst: [], nofbInst: [] }, 
+    "SpTiDi": { base: [], best: [], inst: [], nofbInst: [] } 
   };
 
   Object.keys(pools).forEach(orderKey => {
     // Fill Baseline Pool (12 perms * 6 = 72)
     perms2.forEach(p => { for(let i=0; i<6; i++) pools[orderKey].base.push(p); });
-    // Fill BestPerf & Instructed Pools (24 perms * 3 = 72)
+    // Fill BestPerf, Instructed, and NoFeedbackInstructed pools (24 perms * 3 = 72 each)
     perms4.forEach(p => { 
       for(let i=0; i<3; i++) {
         pools[orderKey].best.push(p);
         pools[orderKey].inst.push(p);
+        pools[orderKey].nofbInst.push(p);
       }
     });
     // Shuffle all decks
     shuffleArray(pools[orderKey].base);
     shuffleArray(pools[orderKey].best);
     shuffleArray(pools[orderKey].inst);
+    shuffleArray(pools[orderKey].nofbInst);
   });
 
   // 3. GENERATE THE DATA
-  const headers = ["Condition", "Metric", "Participant", "Order", "FB Order", "Metric Order", "Baseline", "Explore", "BestPerf", "Instructed"];
+  const headers = [
+    "Condition", "Metric", "Participant", "Order", "FB Order", "Metric Order",
+    "Baseline", "Explore", "BestPerf", "Instructed", "NoFeedbackInstructed"
+  ];
   sheet.appendRow(headers);
 
   let data = [];
@@ -73,6 +78,7 @@ function generateHCIStudy() {
         let baseline = pools[metricOrderString].base.pop();
         let bestPerf = pools[metricOrderString].best.pop();
         let instructed = pools[metricOrderString].inst.pop();
+        let noFeedbackInstructed = popFirstNonMatching(pools[metricOrderString].nofbInst, instructed);
         
         // Explore is derived from Baseline to avoid letter repetition
         let remaining = patterns.filter(char => !baseline.includes(char));
@@ -80,7 +86,7 @@ function generateHCIStudy() {
 
         data.push([
           fb, metric, p, mIdx + 1, fbOrderString, metricOrderString,
-          baseline, explore, bestPerf, instructed
+          baseline, explore, bestPerf, instructed, noFeedbackInstructed
         ]);
       });
     });
@@ -102,4 +108,20 @@ function shuffleArray(array) {
     [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
+}
+
+function popFirstNonMatching(pool, forbidden) {
+  if (!pool.length) return forbidden;
+
+  let idx = pool.findIndex(value => value !== forbidden);
+  if (idx === -1) {
+    // If only matching values remain, return a rotated fallback to keep it distinct.
+    let same = pool.pop();
+    if (same.length > 1) return same.slice(1) + same[0];
+    return same;
+  }
+
+  let last = pool.length - 1;
+  [pool[idx], pool[last]] = [pool[last], pool[idx]];
+  return pool.pop();
 }

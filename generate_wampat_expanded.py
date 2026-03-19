@@ -14,7 +14,8 @@ File naming: {Participant}_{Condition}_{Metric}.wampat
 CSV columns expected (0-indexed):
   0: Condition   1: Metric   2: Participant   3: Order
   4: FB Order    5: Metric Order
-  6: Baseline    7: Explore  8: BestPerf      9: Instructed
+    6: Baseline    7: Explore  8: BestPerf      9: Instructed
+ 10: NoFeedbackInstructed (optional; if missing, derived from Instructed)
 
 Usage:
   python generate_wampat.py                         # uses defaults below
@@ -213,8 +214,24 @@ def build_no_feedback_block(participant: str, condition: str, metric: str, seque
     return "\n".join(lines)
 
 
+def derive_no_feedback_sequence(instructed: str) -> str:
+    """Create a deterministic fallback NoFeedback sequence different from Instructed."""
+    seq = "".join(ch for ch in instructed.upper() if ch in PATTERN_BLOCKS)
+    if len(seq) <= 1:
+        return seq
+
+    # Rotate by one as a simple deterministic counterbalance fallback.
+    rotated = seq[1:] + seq[:1]
+    if rotated != seq:
+        return rotated
+
+    # If all characters are identical, there is no distinct permutation.
+    return seq
+
+
 def build_wampat(participant: str, condition: str, metric: str,
-                 baseline: str, explore: str, best_perf: str, instructed: str) -> str:
+                 baseline: str, explore: str, best_perf: str,
+                 instructed: str, no_feedback_instructed: str) -> str:
     """Returns the full content of one .wampat file."""
     # Generate initial segment ID for this participant/condition/metric combo
     init_segment_id = generate_segment_id(participant, condition, metric, "Baseline")
@@ -244,7 +261,7 @@ def build_wampat(participant: str, condition: str, metric: str,
         "",
         build_phase_block(participant, condition, metric, "Instructed", instructed, is_baseline=False),
         "",
-        build_no_feedback_block(participant, condition, metric, instructed),
+        build_no_feedback_block(participant, condition, metric, no_feedback_instructed),
         "",
         "MESSAGE:(LABEL = Session_Complete, TIME = 3)",
         "WAIT:(TIME = 5)",
@@ -274,6 +291,13 @@ def generate_from_csv(csv_path: str, out_dir: str) -> None:
             explore     = row[7].strip()
             best_perf   = row[8].strip()
             instructed  = row[9].strip()
+            no_feedback_instructed = row[10].strip() if len(row) > 10 else ""
+
+            if not no_feedback_instructed:
+                no_feedback_instructed = derive_no_feedback_sequence(instructed)
+
+            if no_feedback_instructed.upper() == instructed.upper():
+                no_feedback_instructed = derive_no_feedback_sequence(instructed)
 
             # Skip balance/metadata rows - valid rows have numeric participant + known condition
             if not participant.isdigit():
@@ -282,7 +306,8 @@ def generate_from_csv(csv_path: str, out_dir: str) -> None:
                 continue
 
             content   = build_wampat(participant, condition, metric,
-                                     baseline, explore, best_perf, instructed)
+                                     baseline, explore, best_perf,
+                                     instructed, no_feedback_instructed)
             file_name = f"{participant}_{condition}_{metric}.wampat"
             file_path = os.path.join(out_dir, file_name)
 

@@ -12,11 +12,13 @@ The generator implements a within-participant 3×3 factorial design for studying
 
 - **GUI Interface**: User-friendly Tkinter-based interface with file browsing and live logging
 - **Batch Generation**: Processes CSV study designs to generate multiple participant files automatically
-- **Structured Phases**: Four distinct experimental phases per trial:
+- **Structured Phases**: Five distinct experimental phases per generated participant file:
   - **Baseline**: No-feedback performance measurement
   - **Explore**: Learning phase with real-time feedback
   - **BestPerf**: Performance test with feedback
   - **Instructed**: Guided performance phase
+  - **NoFeedback**: Instructed-style phase without performance feedback
+- **Standalone Warmup**: Reusable fixed 15-mole warmup in [warmup.wampat](warmup.wampat) for all participants
 - **Feedback Systems**: Three feedback modalities (Operation, Action, Task)
 - **Performance Metrics**: Three measurement types (Time, Distance, MaxSpeed)
 - **Segment Tracking**: Automated ID generation for data analysis (PPCCMMTT encoding)
@@ -92,16 +94,17 @@ python generate_wampat_expanded.py path/to/study.csv ./output_folder
 Expected columns (0-indexed):
 ```
 0: Condition | 1: Metric | 2: Participant | 3: Order | 4: FB Order | 5: Metric Order
-6: Baseline  | 7: Explore | 8: BestPerf  | 9: Instructed
+6: Baseline  | 7: Explore | 8: BestPerf  | 9: Instructed | 10: NoFeedbackInstructed
 ```
 
-Cells 6-9 contain pattern sequences (e.g., "AC", "BD", "ABCD")
+Cells 6-10 contain pattern sequences (e.g., "AC", "BD", "ABCD")
 
 ## File Structure
 
 ```
 WAMPATgenerator/
 ├── generate_wampat_expanded.py   # Main generator script
+├── warmup.wampat                  # Reusable standalone warmup file
 ├── study.csv                      # Study design input
 ├── requirements.txt               # Dependencies (none needed)
 ├── run.bat                        # Windows launcher
@@ -118,7 +121,7 @@ WAMPATgenerator/
 Each `.wampat` file contains:
 - Wall configuration (grid size, curvature, angle limits)
 - Modifier settings (controller, motor space, feedback mode)
-- Four experimental phases with:
+- Five experimental phases with:
   - Segment IDs for data tracking
   - Participant instructions
   - Mole sequences with coordinates and timing
@@ -132,7 +135,7 @@ Format: `PPCCMMTT`
 - `PP`: Participant number (01-99)
 - `CC`: Condition code (10=Operation, 20=Action, 30=Task)
 - `MM`: Metric code (11=Distance, 22=MaxSpeed, 33=Time)
-- `TT`: Phase code (00=Baseline, 10=Explore, 20=BestPerf, 30=Instructed)
+- `TT`: Phase code (00=Baseline, 10=Explore, 20=BestPerf, 30=Instructed, 50=NoFeedback)
 
 Example: `13011113` = Participant 13, OperationFB, Distance, Instructed phase
 

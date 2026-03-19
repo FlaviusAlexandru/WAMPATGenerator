@@ -2,7 +2,7 @@
  * MASTER VALIDATOR: 
  * 1. Validates FB and Metric Position (Latin Square)
  * 2. Validates Total Letter Distribution (A,B,C,D)
- * 3. Analyzes Pairings for all 4 pattern columns (Baseline, Explore, BestPerf, Instructed)
+ * 3. Analyzes Pairings for all 5 pattern columns (Baseline, Explore, BestPerf, Instructed, NoFeedbackInstructed)
  */
 function validateStudyBalance() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -15,12 +15,13 @@ function validateStudyBalance() {
   let metricPositionMap = {"1":{}, "2":{}, "3":{}, "4":{}, "5":{}, "6":{}, "7":{}, "8":{}, "9":{}};
   let patternMetricMap = {}; 
   
-  // Configuration for the 4 pattern columns
+  // Configuration for the 5 pattern columns
   let pairingConfigs = [
     { index: 6, label: "Baseline", target: 6, data: {} },
     { index: 7, label: "Explore", target: 6, data: {} },
     { index: 8, label: "BestPerf", target: 3, data: {} },
-    { index: 9, label: "Instructed", target: 3, data: {} }
+    { index: 9, label: "Instructed", target: 3, data: {} },
+    { index: 10, label: "NoFeedbackInstructed", target: 3, data: {} }
   ];
 
   const letters = ["A", "B", "C", "D"];
@@ -49,7 +50,7 @@ function validateStudyBalance() {
 
     // B. Letter Distribution Logic
     if (!patternMetricMap[metric]) patternMetricMap[metric] = {A:0, B:0, C:0, D:0};
-    let allPatternsInRow = (data[i][6]||"") + (data[i][7]||"") + (data[i][8]||"") + (data[i][9]||"");
+    let allPatternsInRow = (data[i][6]||"") + (data[i][7]||"") + (data[i][8]||"") + (data[i][9]||"") + (data[i][10]||"");
     letters.forEach(L => {
       let count = (allPatternsInRow.split(L).length - 1);
       patternMetricMap[metric][L] += count;
@@ -76,7 +77,7 @@ function validateStudyBalance() {
   renderLetterTable(sheet, outputRow, startCol, patternMetricMap);
   outputRow += 7;
 
-  // Table 4-7: Pairing Analysis (Baseline, Explore, BestPerf, Instructed)
+  // Table 4-8: Pairing Analysis (Baseline, Explore, BestPerf, Instructed, NoFeedbackInstructed)
   pairingConfigs.forEach(config => {
     sheet.getRange(outputRow, startCol).setValue(config.label + " Pairing (Target: " + config.target + ")").setFontWeight("bold");
     outputRow++;
@@ -117,14 +118,14 @@ function renderSimpleTable(sheet, row, col, title, headers, map, keys, target) {
 
 /** Helper: Letter Table */
 function renderLetterTable(sheet, row, col, patternMetricMap) {
-  sheet.getRange(row, col).setValue("Total Letter Balance (Target 216)").setFontWeight("bold");
+  sheet.getRange(row, col).setValue("Total Letter Balance (Target 288)").setFontWeight("bold");
   sheet.getRange(row + 1, col, 1, 5).setValues([["Metric", "A", "B", "C", "D"]]).setBackground("#eeeeee");
   let currRow = row + 2;
   for (let m in patternMetricMap) {
     let rowData = [m, patternMetricMap[m].A, patternMetricMap[m].B, patternMetricMap[m].C, patternMetricMap[m].D];
     let range = sheet.getRange(currRow, col, 1, 5);
     range.setValues([rowData]);
-    rowData.forEach((v, idx) => { if(idx > 0) range.getCell(1, idx+1).setBackground(v === 216 ? "#b6d7a8" : "#ea9999"); });
+    rowData.forEach((v, idx) => { if(idx > 0) range.getCell(1, idx+1).setBackground(v === 288 ? "#b6d7a8" : "#ea9999"); });
     currRow++;
   }
 }
