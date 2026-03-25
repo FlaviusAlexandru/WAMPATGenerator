@@ -25,6 +25,7 @@ Usage:
 import csv
 import io
 import os
+import re
 import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
@@ -52,7 +53,7 @@ DEFAULT_MODIFIER = (
 # PP = Participant (01-99)
 # CC = Condition (10=Operation, 20=Action, 30=Task)
 # MM = Metric (11=Distance, 22=MaxSpeed, 33=Time)
-# TT = Phase (00=Baseline, 10=Explore, 20=BestPerf, 30=Instructed, 50=NoFeedback)
+# TT = Phase (00=Baseline, 10=Explore, 20=BestPerf, 30=Instructed, 40=NoFeedback)
 def generate_segment_id(participant: str, condition: str, metric: str, phase: str) -> str:
     """Generate a unique segment ID for logging/analysis."""
     pp = participant.zfill(2)
@@ -68,7 +69,7 @@ def generate_segment_id(participant: str, condition: str, metric: str, phase: st
         "Explore": "10",
         "BestPerf": "20",
         "Instructed": "30",
-        "NoFeedback": "50",
+        "NoFeedback": "40",
     }
     tt = tt_map.get(phase, "00")
     
@@ -85,20 +86,28 @@ def _mole_sequence(coords: list) -> str:
 
 
 PATTERN_BLOCKS = {
-    "A": _mole_sequence([
+    "A1": _mole_sequence([
         (2, 2), (3, 1), (7, 5), (6, 3), (9, 4),
+    ]),
+    "A2": _mole_sequence([
         (1, 4), (1, 3), (5, 2), (5, 5), (8, 2),
     ]),
-    "B": _mole_sequence([
+    "B1": _mole_sequence([
         (2, 4), (3, 5), (7, 1), (4, 3), (1, 2),
+    ]),
+    "B2": _mole_sequence([
         (9, 2), (9, 3), (5, 4), (5, 1), (8, 4),
     ]),
-    "C": _mole_sequence([
+    "C1": _mole_sequence([
         (6, 2), (8, 1), (2, 5), (3, 2), (7, 4),
+    ]),
+    "C2": _mole_sequence([
         (4, 5), (4, 1), (4, 4), (7, 3), (3, 3),
     ]),
-    "D": _mole_sequence([
+    "D1": _mole_sequence([
         (6, 4), (8, 5), (2, 1), (3, 4), (4, 2),
+    ]),
+    "D2": _mole_sequence([
         (6, 1), (6, 5), (7, 2), (2, 3), (8, 3),
     ]),
 }
@@ -116,9 +125,23 @@ FEEDBACK_TYPE_MAP = {
 # Core logic
 # ---------------------------------------------------------------------------
 
+def parse_pattern_tokens(sequence: str) -> list:
+    """Parse pattern sequences in either new token format (A1-B2) or legacy format (ABCD)."""
+    raw = (sequence or "").upper()
+    half_tokens = re.findall(r"[ABCD][12]", raw)
+    if half_tokens:
+        return half_tokens
+
+    # Legacy fallback: expand A/B/C/D to A1+A2 style halves.
+    tokens = []
+    for ch in raw:
+        if ch in "ABCD":
+            tokens.extend((f"{ch}1", f"{ch}2"))
+    return tokens
+
 def build_phase_block(participant: str, condition: str, metric: str,
                      phase_name: str, sequence: str, is_baseline: bool = False) -> str:
-    """Returns the WAMPAT text for one phase (e.g. Baseline with sequence 'AC')."""
+    """Returns the WAMPAT text for one phase (e.g. Baseline with sequence 'A1-C2')."""
     segment_id = generate_segment_id(participant, condition, metric, phase_name)
     feedback_type = FEEDBACK_TYPE_MAP.get(condition, "Operation")
     
@@ -151,18 +174,18 @@ def build_phase_block(participant: str, condition: str, metric: str,
         lines.append("WAIT:(TIME = 4)")
     
     # Add pattern blocks with feedback after each (for non-Baseline)
-    for char in sequence:
-        block = PATTERN_BLOCKS.get(char.upper())
+    for token in parse_pattern_tokens(sequence):
+        block = PATTERN_BLOCKS.get(token)
         if block is None:
-            print(f"  WARNING: Unknown pattern key '{char}' in sequence '{sequence}' - skipped.")
+            print(f"  WARNING: Unknown pattern key '{token}' in sequence '{sequence}' - skipped.")
             continue
-        lines.append(f"// --- Pattern Block {char.upper()} ---")
+        lines.append(f"// --- Pattern Block {token} ---")
         lines.append(block)
         
         # Show task feedback after each pattern block (only for TaskFB condition in non-Baseline phases)
         if not is_baseline and condition == "TaskFB":
-            lines.append("FEEDBACK:(TIME = 5)")
-            lines.append("WAIT:(TIME = 5)")  # 5 seconds for task feedback animation to complete
+            lines.append("FEEDBACK:(TIME = 2)")
+            lines.append("WAIT:(TIME = 2)")  # 2 seconds for task feedback animation to complete
     
     # Add calibration point (for all phases)
     lines.append("// --- Calibration Point ---")
@@ -196,12 +219,12 @@ def build_no_feedback_block(participant: str, condition: str, metric: str, seque
         "WAIT:(TIME = 4)",
     ]
 
-    for char in sequence:
-        block = PATTERN_BLOCKS.get(char.upper())
+    for token in parse_pattern_tokens(sequence):
+        block = PATTERN_BLOCKS.get(token)
         if block is None:
-            print(f"  WARNING: Unknown pattern key '{char}' in sequence '{sequence}' - skipped.")
+            print(f"  WARNING: Unknown pattern key '{token}' in sequence '{sequence}' - skipped.")
             continue
-        lines.append(f"// --- Pattern Block {char.upper()} ---")
+        lines.append(f"// --- Pattern Block {token} ---")
         lines.append(block)
 
     lines.append("// --- Calibration Point ---")
@@ -216,17 +239,17 @@ def build_no_feedback_block(participant: str, condition: str, metric: str, seque
 
 def derive_no_feedback_sequence(instructed: str) -> str:
     """Create a deterministic fallback NoFeedback sequence different from Instructed."""
-    seq = "".join(ch for ch in instructed.upper() if ch in PATTERN_BLOCKS)
+    seq = parse_pattern_tokens(instructed)
     if len(seq) <= 1:
-        return seq
+        return "-".join(seq)
 
     # Rotate by one as a simple deterministic counterbalance fallback.
     rotated = seq[1:] + seq[:1]
     if rotated != seq:
-        return rotated
+        return "-".join(rotated)
 
-    # If all characters are identical, there is no distinct permutation.
-    return seq
+    # If all tokens are identical, there is no distinct permutation.
+    return "-".join(seq)
 
 
 def build_wampat(participant: str, condition: str, metric: str,

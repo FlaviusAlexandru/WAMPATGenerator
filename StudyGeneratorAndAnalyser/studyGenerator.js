@@ -1,7 +1,7 @@
 /**
  * GENERATOR: Fully Balanced HCI Study.
- * Ensures Baseline/Explore (Target 6) and BestPerf/Instructed (Target 3) 
- * are perfectly balanced against every Metric Order.
+ * Uses 8 half-pattern tokens (A1..D2) to shorten each phase while
+ * preserving study structure and Latin-square condition/metric order.
  */
 function generateHCIStudy() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -11,60 +11,14 @@ function generateHCIStudy() {
   const numParticipants = 24;
   const fbTypes = ["OperationFB", "ActionFB", "TaskFB"];
   const metrics = ["Time", "Distance", "MaxSpeed"];
-  const patterns = ["A", "B", "C", "D"];
+  const patterns = ["A1", "A2", "B1", "B2", "C1", "C2", "D1", "D2"];
   const fbAbbr = {"OperationFB": "Op", "ActionFB": "Ac", "TaskFB": "Ta"};
   const metricAbbr = {"Time": "Ti", "Distance": "Di", "MaxSpeed": "Sp"};
 
-  // 1. PRE-CALCULATE PERMUTATIONS
-  // 2-letter permutations (12 total)
-  let perms2 = [];
-  for (let i=0; i<4; i++) for (let j=0; j<4; j++) if (i!==j) perms2.push(patterns[i]+patterns[j]);
-
-  // 4-letter permutations (24 total)
-  let perms4 = [];
-  function getPerms4(current, remaining) {
-    if (remaining.length === 0) { perms4.push(current); return; }
-    for (let i=0; i<remaining.length; i++) {
-      getPerms4(current + remaining[i], remaining.slice(0,i).concat(remaining.slice(i+1)));
-    }
-  }
-  getPerms4("", patterns);
-
-  // 2. BUILD DECKS FOR EACH METRIC ORDER
-  let pools = { 
-    "TiDiSp": { base: [], best: [], inst: [], nofbInst: [] }, 
-    "DiSpTi": { base: [], best: [], inst: [], nofbInst: [] }, 
-    "SpTiDi": { base: [], best: [], inst: [], nofbInst: [] } 
-  };
-
-  Object.keys(pools).forEach(orderKey => {
-    // Fill Baseline Pool (12 perms * 6 = 72)
-    perms2.forEach(p => { for(let i=0; i<6; i++) pools[orderKey].base.push(p); });
-    // Fill BestPerf, Instructed, and NoFeedbackInstructed pools (24 perms * 3 = 72 each)
-    perms4.forEach(p => { 
-      for(let i=0; i<3; i++) {
-        pools[orderKey].best.push(p);
-        pools[orderKey].inst.push(p);
-        pools[orderKey].nofbInst.push(p);
-      }
-    });
-    // Shuffle all decks
-    shuffleArray(pools[orderKey].base);
-    shuffleArray(pools[orderKey].best);
-    shuffleArray(pools[orderKey].inst);
-    shuffleArray(pools[orderKey].nofbInst);
-  });
-
-  // 3. GENERATE THE DATA
-  const headers = [
-    "Condition", "Metric", "Participant", "Order", "FB Order", "Metric Order",
-    "Baseline", "Explore", "BestPerf", "Instructed", "NoFeedbackInstructed"
-  ];
-  sheet.appendRow(headers);
-
-  let data = [];
+  // Build a full trial plan first so pool sizes always match required counts.
+  let trialPlan = [];
   for (let p = 1; p <= numParticipants; p++) {
-    let fbOrderIdx = (p - 1) % 3; 
+    let fbOrderIdx = (p - 1) % 3;
     let pFbTypes = rotateArray(fbTypes, fbOrderIdx);
     let fbOrderString = pFbTypes.map(f => fbAbbr[f]).join("");
 
@@ -74,29 +28,79 @@ function generateHCIStudy() {
       let metricOrderString = pMetrics.map(m => metricAbbr[m]).join("");
 
       pMetrics.forEach((metric, mIdx) => {
-        // Draw from the specialized decks
-        let baseline = pools[metricOrderString].base.pop();
-        let bestPerf = pools[metricOrderString].best.pop();
-        let instructed = pools[metricOrderString].inst.pop();
-        let noFeedbackInstructed = popFirstNonMatching(pools[metricOrderString].nofbInst, instructed);
-        
-        // Explore is derived from Baseline to avoid letter repetition
-        let remaining = patterns.filter(char => !baseline.includes(char));
-        let explore = shuffleArray([...remaining]).join("");
-
-        data.push([
-          fb, metric, p, mIdx + 1, fbOrderString, metricOrderString,
-          baseline, explore, bestPerf, instructed, noFeedbackInstructed
-        ]);
+        trialPlan.push({
+          fb,
+          metric,
+          participant: p,
+          order: mIdx + 1,
+          fbOrderString,
+          metricOrderString,
+          poolKey: metricOrderString + "|" + metric,
+        });
       });
     });
   }
+
+  // Prepare balanced decks per metric-order and metric stratum.
+  let stratumCounts = {};
+  trialPlan.forEach(trial => {
+    stratumCounts[trial.poolKey] = (stratumCounts[trial.poolKey] || 0) + 1;
+  });
+
+  let pools = {};
+  Object.keys(stratumCounts).forEach(poolKey => {
+    const totalRows = stratumCounts[poolKey] || 0;
+    pools[poolKey] = {
+      base: buildBalancedSequenceDeck(patterns, 2, totalRows),
+      explore: buildBalancedSequenceDeck(patterns, 2, totalRows),
+      best: buildBalancedSequenceDeck(patterns, 4, totalRows),
+      inst: buildBalancedSequenceDeck(patterns, 4, totalRows),
+      nofbInst: buildBalancedSequenceDeck(patterns, 4, totalRows),
+    };
+  });
+
+  // 1. GENERATE THE DATA
+  const headers = [
+    "Condition", "Metric", "Participant", "Order", "FB Order", "Metric Order",
+    "Baseline", "Explore", "BestPerf", "Instructed", "NoFeedbackInstructed"
+  ];
+  sheet.appendRow(headers);
+
+  let data = [];
+  trialPlan.forEach(trial => {
+    const orderPool = pools[trial.poolKey];
+    const baseline = orderPool.base.pop();
+    const baselineSet = toTokenSet(baseline);
+
+    // Prefer explore sequences with no token overlap to baseline.
+    const explore = popFirstMatching(orderPool.explore, sequence =>
+      isDisjointSet(toTokenSet(sequence), baselineSet)
+    );
+
+    const bestPerf = orderPool.best.pop();
+    const instructed = orderPool.inst.pop();
+    const noFeedbackInstructed = popFirstNonMatching(orderPool.nofbInst, instructed);
+
+    data.push([
+      trial.fb,
+      trial.metric,
+      trial.participant,
+      trial.order,
+      trial.fbOrderString,
+      trial.metricOrderString,
+      baseline,
+      explore,
+      bestPerf,
+      instructed,
+      noFeedbackInstructed,
+    ]);
+  });
 
   sheet.getRange(2, 1, data.length, headers.length).setValues(data);
   sheet.setFrozenRows(1);
 }
 
-// Helpers (unchanged)
+// Helpers
 function rotateArray(arr, shift) {
   let result = [...arr];
   for (let i = 0; i < shift; i++) { result.push(result.shift()); }
@@ -110,18 +114,130 @@ function shuffleArray(array) {
   return array;
 }
 
-function popFirstNonMatching(pool, forbidden) {
-  if (!pool.length) return forbidden;
+function buildBalancedSequenceDeck(tokens, seqLength, totalRows) {
+  if (totalRows === 0) return [];
 
-  let idx = pool.findIndex(value => value !== forbidden);
+  const totalSlots = totalRows * seqLength;
+  if (totalSlots % tokens.length !== 0) {
+    throw new Error("Cannot evenly balance token usage for requested deck size.");
+  }
+
+  const perTokenTarget = totalSlots / tokens.length;
+
+  // Retry generation to avoid rare dead-end selections.
+  for (let attempt = 0; attempt < 80; attempt++) {
+    let remaining = {};
+    tokens.forEach(token => { remaining[token] = perTokenTarget; });
+
+    let deck = [];
+    let failed = false;
+
+    for (let row = 0; row < totalRows; row++) {
+      const sequence = takeUniqueTokens(remaining, seqLength);
+      if (!sequence) {
+        failed = true;
+        break;
+      }
+      deck.push(sequence.join("-"));
+    }
+
+    if (failed) {
+      continue;
+    }
+
+    const leftovers = Object.keys(remaining).some(token => remaining[token] !== 0);
+    if (leftovers) {
+      continue;
+    }
+
+    return shuffleArray(deck);
+  }
+
+  throw new Error("Failed to build balanced sequence deck after multiple attempts.");
+}
+
+function takeUniqueTokens(remaining, count) {
+  let chosen = [];
+  let chosenSet = {};
+
+  for (let i = 0; i < count; i++) {
+    const candidates = Object.keys(remaining).filter(token => remaining[token] > 0 && !chosenSet[token]);
+    if (!candidates.length) {
+      return null;
+    }
+
+    const picked = weightedPick(candidates, remaining);
+    chosen.push(picked);
+    chosenSet[picked] = true;
+    remaining[picked] -= 1;
+  }
+
+  return shuffleArray(chosen);
+}
+
+function weightedPick(candidates, remaining) {
+  let totalWeight = 0;
+  candidates.forEach(token => { totalWeight += remaining[token]; });
+
+  let r = Math.random() * totalWeight;
+  for (let i = 0; i < candidates.length; i++) {
+    const token = candidates[i];
+    r -= remaining[token];
+    if (r <= 0) {
+      return token;
+    }
+  }
+
+  return candidates[candidates.length - 1];
+}
+
+function popFirstMatching(pool, predicate) {
+  if (!pool.length) return "";
+  const idx = pool.findIndex(predicate);
   if (idx === -1) {
-    // If only matching values remain, return a rotated fallback to keep it distinct.
-    let same = pool.pop();
-    if (same.length > 1) return same.slice(1) + same[0];
+    return pool.pop();
+  }
+
+  const last = pool.length - 1;
+  [pool[idx], pool[last]] = [pool[last], pool[idx]];
+  return pool.pop();
+}
+
+function popFirstNonMatching(pool, forbiddenSequence) {
+  if (!pool.length) return forbiddenSequence;
+
+  let idx = pool.findIndex(value => value !== forbiddenSequence);
+  if (idx === -1) {
+    // If only matching values remain, rotate token order as deterministic fallback.
+    const same = pool.pop();
+    const tokens = same.split("-").filter(Boolean);
+    if (tokens.length > 1) {
+      const rotated = tokens.slice(1).concat(tokens.slice(0, 1));
+      return rotated.join("-");
+    }
     return same;
   }
 
-  let last = pool.length - 1;
+  const last = pool.length - 1;
   [pool[idx], pool[last]] = [pool[last], pool[idx]];
   return pool.pop();
+}
+
+function toTokenSet(sequence) {
+  const set = {};
+  sequence.split("-").forEach(token => {
+    if (token) {
+      set[token] = true;
+    }
+  });
+  return set;
+}
+
+function isDisjointSet(a, b) {
+  for (let key in a) {
+    if (b[key]) {
+      return false;
+    }
+  }
+  return true;
 }
