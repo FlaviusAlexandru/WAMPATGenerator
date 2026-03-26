@@ -87,28 +87,28 @@ def _mole_sequence(coords: list) -> str:
 
 PATTERN_BLOCKS = {
     "A1": _mole_sequence([
-        (2, 2), (3, 1), (7, 5), (6, 3), (9, 4),
+        (5,3), (2, 2), (3, 1), (7, 5), (6, 3), (9, 4),
     ]),
     "A2": _mole_sequence([
-        (1, 4), (1, 3), (5, 2), (5, 5), (8, 2),
+        (5,3), (1, 4), (1, 3), (5, 2), (5, 5), (8, 2),
     ]),
     "B1": _mole_sequence([
-        (2, 4), (3, 5), (7, 1), (4, 3), (1, 2),
+        (5,3), (2, 4), (3, 5), (7, 1), (4, 3), (1, 2),
     ]),
     "B2": _mole_sequence([
-        (9, 2), (9, 3), (5, 4), (5, 1), (8, 4),
+        (5,3), (9, 2), (9, 3), (5, 4), (5, 1), (8, 4),
     ]),
     "C1": _mole_sequence([
-        (6, 2), (8, 1), (2, 5), (3, 2), (7, 4),
+        (5,3), (6, 2), (8, 1), (2, 5), (3, 2), (7, 4),
     ]),
     "C2": _mole_sequence([
-        (4, 5), (4, 1), (4, 4), (7, 3), (3, 3),
+        (5,3), (4, 5), (4, 1), (4, 4), (7, 3), (3, 3),
     ]),
     "D1": _mole_sequence([
-        (6, 4), (8, 5), (2, 1), (3, 4), (4, 2),
+        (5,3), (6, 4), (8, 5), (2, 1), (3, 4), (4, 2),
     ]),
     "D2": _mole_sequence([
-        (6, 1), (6, 5), (7, 2), (2, 3), (8, 3),
+        (5,3), (6, 1), (6, 5), (7, 2), (2, 3), (8, 3),
     ]),
 }
 
@@ -158,6 +158,12 @@ def build_phase_block(participant: str, condition: str, metric: str,
         lines.append(
             f"MODIFIER:(PERFORMANCEFEEDBACK = {feedback_type}, JUDGEMENT = {metric}, MOTORSPACEOOBSIGNIFICANT = None)"
         )
+    """# Add calibration point (for all phases)
+    lines.append("// --- Calibration Point ---")
+    lines.append(f"SEGMENT:(ID = {segment_id}99, LABEL = Calibration_Point)")
+    lines.append("MOLE:(X = 5, Y = 3, LIFETIME = 5) // Center calibration")
+    lines.append("WAIT:(HIT)")"""
+    
     # Add phase-specific instructions
     if phase_name == "Baseline":
         lines.append("MESSAGE:(LABEL = Get_Ready, TIME = 3)")
@@ -184,19 +190,8 @@ def build_phase_block(participant: str, condition: str, metric: str,
         
         # Show task feedback after each pattern block (only for TaskFB condition in non-Baseline phases)
         if not is_baseline and condition == "TaskFB":
-            lines.append("FEEDBACK:(TIME = 2)")
-            lines.append("WAIT:(TIME = 2)")  # 2 seconds for task feedback animation to complete
-    
-    # Add calibration point (for all phases)
-    lines.append("// --- Calibration Point ---")
-    lines.append(f"SEGMENT:(ID = {segment_id}99, LABEL = Calibration_Point)")
-    lines.append("MOLE:(X = 5, Y = 3, LIFETIME = 5) // Center calibration")
-    lines.append("WAIT:(HIT)")
-    
-    # Add feedback question only for the last phase (Instructed)
-    if phase_name == "Instructed":
-        lines.append("MESSAGE:(LABEL = Feedback_Question, TIME = 3)")
-        lines.append("WAIT:(TIME = 4)")
+            lines.append("FEEDBACK:(TIME = 3)")
+            lines.append("WAIT:(TIME = 3)")  # 3 seconds for task feedback animation to complete
     
     # Add calibration end for Baseline phase
     if is_baseline:
@@ -215,6 +210,10 @@ def build_no_feedback_block(participant: str, condition: str, metric: str, seque
         f"// ============ Phase: NoFeedback (sequence: {sequence}) ============",
         f"SEGMENT:(ID = {segment_id}, LABEL = NoFeedback)",
         f"MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = {metric}, MOTORSPACEOOBSIGNIFICANT = None)",
+        "// --- Calibration Point ---",
+        f"SEGMENT:(ID = {segment_id}99, LABEL = Calibration_Point)",
+        "MOLE:(X = 5, Y = 3, LIFETIME = 5) // Center calibration",
+        "WAIT:(HIT)",
         "MESSAGE:(LABEL = No_Feedback, TIME = 3)",
         "WAIT:(TIME = 4)",
     ]
@@ -227,10 +226,6 @@ def build_no_feedback_block(participant: str, condition: str, metric: str, seque
         lines.append(f"// --- Pattern Block {token} ---")
         lines.append(block)
 
-    lines.append("// --- Calibration Point ---")
-    lines.append(f"SEGMENT:(ID = {segment_id}99, LABEL = Calibration_Point)")
-    lines.append("MOLE:(X = 5, Y = 3, LIFETIME = 5) // Center calibration")
-    lines.append("WAIT:(HIT)")
     lines.append("// ============ End of NoFeedback ============")
     lines.append("WAIT:(TIME = 2)")
 
