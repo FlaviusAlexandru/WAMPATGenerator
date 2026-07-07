@@ -4,8 +4,10 @@ unity_pattern_builder.py
 Standalone GUI for assembling .wampat files with Unity-aware detection.
 
 This window scans a Unity Pattern scripts folder, reports the actions the
-runtime expects, and lets users build phase sequences by dragging pattern
-tokens into the five study phases.
+runtime expects, and lets users build phase sequences by dragging mole types
+into the five study phases, then editing their wall positions. The legacy
+A1..D2 palette was a full-wall tiling scheme for a 5-row by 9-column wall,
+so the old presets are being replaced by explicit mole type and position data.
 """
 
 from __future__ import annotations
@@ -22,12 +24,27 @@ from generate_wampat_expanded import build_wampat, derive_no_feedback_sequence
 DEFAULT_UNITY_PATTERN_DIR = r"C:\Users\FU05OG\Documents\GitHub\Whack_A_Mole_VR\Assets\Scripts\Patterns"
 DEFAULT_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "generated_wampat")
 
-PATTERN_TOKENS = ["A1", "A2", "B1", "B2", "C1", "C2", "D1", "D2"]
+MOLE_TYPE_OPTIONS = [
+    "SimpleTarget",
+    "BallMole",
+    "DistractorLeft",
+    "DistractorRight",
+    "GestureMole",
+    "Invisible",
+    "BalloonMole",
+    "WaspMole",
+    "KeyMole",
+    "CountdownMole",
+]
+DEFAULT_MOLE_TYPE = MOLE_TYPE_OPTIONS[0]
+DEFAULT_MOLE_X = "5"
+DEFAULT_MOLE_Y = "3"
+DEFAULT_MOLE_LIFETIME = "5"
 PHASE_KEYS = ["Baseline", "Explore", "BestPerf", "Instructed", "NoFeedback"]
 VALID_CONDITIONS = ["OperationFB", "ActionFB", "TaskFB"]
 VALID_METRICS = ["Time", "Distance", "MaxSpeed"]
 UNITY_STATEMENT_TEMPLATES = [
-    "MOLE:(X = 5, Y = 3, LIFETIME = 5)",
+    "MOLE:(TYPE = SimpleTarget, X = 5, Y = 3, LIFETIME = 5)",
     "WAIT:(HIT)",
     "WAIT:(TIME = 3)",
     "SEGMENT:(ID = 01103300, LABEL = Baseline)",
@@ -37,6 +54,32 @@ UNITY_STATEMENT_TEMPLATES = [
 ]
 
 ACTION_RE = re.compile(r'case\s+"([A-Z][A-Z0-9_]*)"|keyValue\[0\]\s*==\s*"([A-Z][A-Z0-9_]*)"')
+
+
+def format_mole_entry(mole_type: str, x_pos: str = DEFAULT_MOLE_X, y_pos: str = DEFAULT_MOLE_Y, lifetime: str = DEFAULT_MOLE_LIFETIME) -> str:
+    return f"{mole_type}@{x_pos},{y_pos},{lifetime}"
+
+
+def parse_mole_entry(entry: str) -> tuple[str, str, str, str]:
+    mole_type = DEFAULT_MOLE_TYPE
+    x_pos = DEFAULT_MOLE_X
+    y_pos = DEFAULT_MOLE_Y
+    lifetime = DEFAULT_MOLE_LIFETIME
+
+    raw = (entry or "").strip()
+    if "@" in raw:
+        mole_type_part, position_part = raw.split("@", 1)
+        mole_type = mole_type_part.strip() or DEFAULT_MOLE_TYPE
+        position_bits = [part.strip() for part in position_part.split(",") if part.strip()]
+        if len(position_bits) >= 2:
+            x_pos = position_bits[0]
+            y_pos = position_bits[1]
+        if len(position_bits) >= 3:
+            lifetime = position_bits[2]
+    elif raw:
+        mole_type = raw
+
+    return mole_type, x_pos, y_pos, lifetime
 
 
 @dataclass
@@ -109,6 +152,10 @@ class PhaseEditor(ttk.Frame):
         self.phase_key = phase_key
         self.add_callback = add_callback
         self.label_var = tk.StringVar(value=phase_key)
+        self.type_var = tk.StringVar(value=DEFAULT_MOLE_TYPE)
+        self.x_var = tk.StringVar(value=DEFAULT_MOLE_X)
+        self.y_var = tk.StringVar(value=DEFAULT_MOLE_Y)
+        self.lifetime_var = tk.StringVar(value=DEFAULT_MOLE_LIFETIME)
 
         header = ttk.Frame(self)
         header.pack(fill="x", pady=(0, 4))
@@ -121,8 +168,28 @@ class PhaseEditor(ttk.Frame):
         ttk.Label(label_row, text="Label", width=8).pack(side="left")
         ttk.Entry(label_row, textvariable=self.label_var).pack(side="left", fill="x", expand=True)
 
-        self.tokens = tk.Listbox(self, height=1, selectmode="browse", exportselection=False)
+        self.tokens = tk.Listbox(self, height=4, selectmode="browse", exportselection=False)
         self.tokens.pack(fill="x")
+        self.tokens.bind("<<ListboxSelect>>", self._load_selected_entry)
+
+        edit_panel = ttk.Frame(self)
+        edit_panel.pack(fill="x", pady=(4, 0))
+
+        type_row = ttk.Frame(edit_panel)
+        type_row.pack(fill="x")
+        ttk.Label(type_row, text="Type", width=8).pack(side="left")
+        ttk.Combobox(type_row, textvariable=self.type_var, values=MOLE_TYPE_OPTIONS, state="readonly").pack(side="left", fill="x", expand=True)
+
+        position_row = ttk.Frame(edit_panel)
+        position_row.pack(fill="x", pady=(4, 0))
+        ttk.Label(position_row, text="X", width=8).pack(side="left")
+        ttk.Entry(position_row, textvariable=self.x_var, width=6).pack(side="left")
+        ttk.Label(position_row, text="Y", width=3).pack(side="left", padx=(6, 0))
+        ttk.Entry(position_row, textvariable=self.y_var, width=6).pack(side="left")
+        ttk.Label(position_row, text="Lifetime", width=8).pack(side="left", padx=(6, 0))
+        ttk.Entry(position_row, textvariable=self.lifetime_var, width=6).pack(side="left")
+
+        ttk.Button(edit_panel, text="Update selected", command=self.update_selected).pack(anchor="w", pady=(4, 0))
 
         buttons = ttk.Frame(self)
         buttons.pack(fill="x", pady=(4, 0))
@@ -133,11 +200,28 @@ class PhaseEditor(ttk.Frame):
 
         self.drop_target = ttk.Frame(self, padding=4, relief="ridge")
         self.drop_target.pack(fill="x", pady=(4, 0))
-        ttk.Label(self.drop_target, text="Drop tokens here", foreground="#666666").pack(anchor="w")
+        ttk.Label(self.drop_target, text="Drop mole types here", foreground="#666666").pack(anchor="w")
 
     def add_token(self, token: str) -> None:
-        self.tokens.insert("end", token)
+        self.tokens.insert("end", format_mole_entry(token))
         self._select_last()
+        self._load_selected_entry()
+        self.add_callback()
+
+    def update_selected(self) -> None:
+        selection = self.tokens.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        self.tokens.delete(index)
+        self.tokens.insert(index, format_mole_entry(
+            self.type_var.get().strip() or DEFAULT_MOLE_TYPE,
+            self.x_var.get().strip() or DEFAULT_MOLE_X,
+            self.y_var.get().strip() or DEFAULT_MOLE_Y,
+            self.lifetime_var.get().strip() or DEFAULT_MOLE_LIFETIME,
+        ))
+        self.tokens.selection_set(index)
+        self.tokens.see(index)
         self.add_callback()
 
     def clear(self) -> None:
@@ -162,6 +246,7 @@ class PhaseEditor(ttk.Frame):
         self.tokens.delete(index)
         self.tokens.insert(index - 1, token)
         self.tokens.selection_set(index - 1)
+        self._load_selected_entry()
         self.add_callback()
 
     def move_down(self) -> None:
@@ -175,6 +260,7 @@ class PhaseEditor(ttk.Frame):
         self.tokens.delete(index)
         self.tokens.insert(index + 1, token)
         self.tokens.selection_set(index + 1)
+        self._load_selected_entry()
         self.add_callback()
 
     def values(self) -> list[str]:
@@ -183,6 +269,16 @@ class PhaseEditor(ttk.Frame):
     def label(self) -> str:
         value = self.label_var.get().strip()
         return value or self.phase_key
+
+    def _load_selected_entry(self, event=None) -> None:
+        selection = self.tokens.curselection()
+        if not selection:
+            return
+        mole_type, x_pos, y_pos, lifetime = parse_mole_entry(self.tokens.get(selection[0]))
+        self.type_var.set(mole_type)
+        self.x_var.set(x_pos)
+        self.y_var.set(y_pos)
+        self.lifetime_var.set(lifetime)
 
     def _select_last(self) -> None:
         if self.tokens.size() > 0:
@@ -215,13 +311,34 @@ class UnityPatternBuilderApp(tk.Tk):
         self._rebuild_preview()
 
     def _build_layout(self) -> None:
-        outer = ttk.Frame(self, padding=12)
-        outer.pack(fill="both", expand=True)
+        viewport = ttk.Frame(self, padding=0)
+        viewport.pack(fill="both", expand=True)
 
-        left = ttk.Frame(outer)
+        self.layout_canvas = tk.Canvas(viewport, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(viewport, orient="vertical", command=self.layout_canvas.yview)
+        self.layout_canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        self.layout_canvas.pack(side="left", fill="both", expand=True)
+
+        self.scrollable_layout = ttk.Frame(self.layout_canvas, padding=12)
+        layout_window = self.layout_canvas.create_window((0, 0), window=self.scrollable_layout, anchor="nw")
+
+        def _sync_scrollregion(event) -> None:
+            self.layout_canvas.configure(scrollregion=self.layout_canvas.bbox("all"))
+
+        def _sync_canvas_width(event) -> None:
+            self.layout_canvas.itemconfigure(layout_window, width=event.width)
+
+        self.scrollable_layout.bind("<Configure>", _sync_scrollregion)
+        self.layout_canvas.bind("<Configure>", _sync_canvas_width)
+
+        self.bind_all("<MouseWheel>", self._on_mousewheel)
+
+        left = ttk.Frame(self.scrollable_layout)
         left.pack(side="left", fill="y", padx=(0, 12))
 
-        right = ttk.Frame(outer)
+        right = ttk.Frame(self.scrollable_layout)
         right.pack(side="right", fill="both", expand=True)
 
         self._build_detection_panel(left)
@@ -231,6 +348,12 @@ class UnityPatternBuilderApp(tk.Tk):
 
         self._build_phase_panel(right)
         self._build_preview_panel(right)
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        if not hasattr(self, "layout_canvas"):
+            return
+        delta = int(-1 * (event.delta / 120))
+        self.layout_canvas.yview_scroll(delta, "units")
 
     def _build_detection_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.LabelFrame(parent, text="Unity Pattern Surface", padding=10)
@@ -258,7 +381,7 @@ class UnityPatternBuilderApp(tk.Tk):
         self.palette_frame = ttk.Frame(panel)
         self.palette_frame.pack(fill="x")
 
-        for index, token in enumerate(PATTERN_TOKENS):
+        for index, token in enumerate(MOLE_TYPE_OPTIONS):
             button = tk.Label(
                 self.palette_frame,
                 text=token,
@@ -276,7 +399,7 @@ class UnityPatternBuilderApp(tk.Tk):
         self.palette_frame.columnconfigure(0, weight=1)
         self.palette_frame.columnconfigure(1, weight=1)
 
-        hint = ttk.Label(panel, text="Drop on a phase card to append a token.", wraplength=320)
+        hint = ttk.Label(panel, text="Drop a mole type onto a phase card, then edit X/Y to place it on the wall.", wraplength=320)
         hint.pack(anchor="w", pady=(8, 0))
 
     def _build_statement_panel(self, parent: ttk.Frame) -> None:
@@ -285,7 +408,7 @@ class UnityPatternBuilderApp(tk.Tk):
 
         ttk.Label(
             panel,
-            text="The reader accepts KEY:(properties). Parentheses can be empty; use these as copyable examples.",
+            text="The reader accepts KEY:(properties). MOLE also accepts TYPE so you can choose a mole prefab and position it on the wall.",
             wraplength=320,
             justify="left",
         ).pack(anchor="w", pady=(0, 8))
@@ -333,18 +456,18 @@ class UnityPatternBuilderApp(tk.Tk):
         panel = ttk.LabelFrame(parent, text="Live Preview", padding=10)
         panel.pack(fill="both", expand=True, pady=(12, 0))
 
-        ttk.Label(panel, text="Preview uses Unity-style KEY:(properties) lines and keeps your phase labels as comments/segment labels.", wraplength=760, justify="left").pack(anchor="w", pady=(0, 8))
+        ttk.Label(panel, text="Preview uses Unity-style KEY:(properties) lines. Mole entries are exported as TYPE + wall coordinates, and your phase labels stay attached to the segment comments.", wraplength=760, justify="left").pack(anchor="w", pady=(0, 8))
 
         self.preview = scrolledtext.ScrolledText(panel, height=24, wrap="none", font=("Consolas", 9))
         self.preview.pack(fill="both", expand=True)
 
-    def _add_labeled_entry(self, parent: ttk.Frame, label: str, variable: tk.StringVar) -> None:
+    def _add_labeled_entry(self, parent: tk.Misc, label: str, variable: tk.StringVar) -> None:
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(0, 6))
         ttk.Label(row, text=label, width=14).pack(side="left")
         ttk.Entry(row, textvariable=variable).pack(side="left", fill="x", expand=True)
 
-    def _add_labeled_combo(self, parent: ttk.Frame, label: str, variable: tk.StringVar, values: list[str]) -> None:
+    def _add_labeled_combo(self, parent: tk.Misc, label: str, variable: tk.StringVar, values: list[str]) -> None:
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(0, 6))
         ttk.Label(row, text=label, width=14).pack(side="left")
@@ -429,7 +552,7 @@ class UnityPatternBuilderApp(tk.Tk):
 
     def _phase_sequence(self, phase_name: str) -> str:
         values = self.phase_editors[phase_name].values()
-        return "-".join(values)
+        return "\n".join(values)
 
     def _rebuild_preview(self) -> None:
         baseline = self._phase_sequence("Baseline")
@@ -462,17 +585,19 @@ class UnityPatternBuilderApp(tk.Tk):
 
     def _load_sample_layout(self) -> None:
         sample_layout = {
-            "Baseline": ["A1", "B2"],
-            "Explore": ["C1", "D2"],
-            "BestPerf": ["A2", "C2"],
-            "Instructed": ["B1", "D1"],
-            "NoFeedback": ["D2", "A1"],
+            "Baseline": [("SimpleTarget", "5", "3"), ("BallMole", "2", "2")],
+            "Explore": [("DistractorLeft", "3", "1"), ("WaspMole", "7", "5")],
+            "BestPerf": [("BalloonMole", "6", "2"), ("KeyMole", "8", "4")],
+            "Instructed": [("GestureMole", "4", "5"), ("CountdownMole", "1", "4")],
+            "NoFeedback": [("Invisible", "6", "1"), ("DistractorRight", "7", "2")],
         }
         for phase_name, tokens in sample_layout.items():
             editor = self.phase_editors[phase_name]
             editor.clear()
-            for token in tokens:
-                editor.add_token(token)
+            for mole_type, x_pos, y_pos in tokens:
+                editor.tokens.insert("end", format_mole_entry(mole_type, x_pos, y_pos))
+            editor._select_last()
+            editor._load_selected_entry()
         self.phase_editors["Baseline"].label_var.set("Baseline")
         self.phase_editors["Explore"].label_var.set("Explore")
         self.phase_editors["BestPerf"].label_var.set("BestPerf")

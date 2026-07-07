@@ -42,6 +42,10 @@ WALL_CONFIG = (
     "CURVEX = 0.1, CURVEY = 0.1, MAXANGLE = 80, MOLESCALEX = 34, MOLESCALEY = 34)"
 )
 
+DEFAULT_MOLE_TYPE = "SimpleTarget"
+DEFAULT_MOLE_POSITION = (5, 3)
+DEFAULT_MOLE_LIFETIME = 5
+
 DEFAULT_MODIFIER = (
     "MODIFIER:(EYEPATCH = None, MIRROR = False, CONTROLLEROFFSET = 0.0, "
     "PRISM = 0.0, HIDEWALL = None, HIDEWALLAMOUNT = 0.5, GEOMETRICMIRROR = False, "
@@ -125,6 +129,71 @@ FEEDBACK_TYPE_MAP = {
 # Core logic
 # ---------------------------------------------------------------------------
 
+def split_pattern_units(sequence: str) -> list[str]:
+    """Split a phase sequence into legacy tokens or explicit mole entries."""
+    raw = (sequence or "").strip()
+    if not raw:
+        return []
+
+    legacy_tokens = re.findall(r"[ABCD][12]", raw.upper())
+    if legacy_tokens:
+        return legacy_tokens
+
+    if "\n" in raw or ";" in raw:
+        return [part.strip() for part in re.split(r"[\n;]+", raw) if part.strip()]
+
+    return [part.strip() for part in raw.split("-") if part.strip()]
+
+
+def format_mole_statement(token: str) -> str:
+    """Build a MOLE statement from an explicit type/position token."""
+    token = token.strip()
+    mole_type = DEFAULT_MOLE_TYPE
+    x_pos, y_pos = DEFAULT_MOLE_POSITION
+    lifetime = DEFAULT_MOLE_LIFETIME
+
+    if "@" in token:
+        type_part, position_part = token.split("@", 1)
+        mole_type = type_part.strip() or DEFAULT_MOLE_TYPE
+        position_bits = [part.strip() for part in position_part.split(",") if part.strip()]
+        if len(position_bits) >= 2:
+            x_pos = position_bits[0]
+            y_pos = position_bits[1]
+        if len(position_bits) >= 3:
+            lifetime = position_bits[2]
+    elif token:
+        mole_type = token
+
+    return f"MOLE:(TYPE = {mole_type}, X = {x_pos}, Y = {y_pos}, LIFETIME = {lifetime})"
+
+
+def build_pattern_lines(sequence: str) -> list[str]:
+    """Expand a sequence into printable WAMPAT lines."""
+    lines: list[str] = []
+    for token in split_pattern_units(sequence):
+        legacy_block = PATTERN_BLOCKS.get(token.upper())
+        if legacy_block is not None:
+            lines.append(f"// --- Pattern Block {token.upper()} ---")
+            lines.append(legacy_block)
+            continue
+
+        lines.append(f"// --- Mole Entry {token} ---")
+        lines.append(format_mole_statement(token))
+
+    return lines
+
+
+def append_pattern_unit(lines: list[str], token: str) -> None:
+    """Append one legacy block or explicit mole entry to a WAMPAT section."""
+    legacy_block = PATTERN_BLOCKS.get(token.upper())
+    if legacy_block is not None:
+        lines.append(f"// --- Pattern Block {token.upper()} ---")
+        lines.append(legacy_block)
+        return
+
+    lines.append(f"// --- Mole Entry {token} ---")
+    lines.append(format_mole_statement(token))
+
 def parse_pattern_tokens(sequence: str) -> list:
     """Parse pattern sequences in either new token format (A1-B2) or legacy format (ABCD)."""
     raw = (sequence or "").upper()
@@ -146,9 +215,10 @@ def build_phase_block(participant: str, condition: str, metric: str,
     phase_label = phase_label or phase_name
     segment_id = generate_segment_id(participant, condition, metric, phase_name)
     feedback_type = FEEDBACK_TYPE_MAP.get(condition, "Operation")
+    sequence_comment = (sequence or "").replace("\n", " | ").replace(";", " | ").strip() or "None"
     
     lines = [
-        f"// ============ Phase: {phase_label} (sequence: {sequence}) ============",
+        f"// ============ Phase: {phase_label} (sequence: {sequence_comment}) ============",
         f"SEGMENT:(ID = {segment_id}, LABEL = {phase_label})",
     ]
         # Set performance feedback and judgement parameters per phase
@@ -182,15 +252,10 @@ def build_phase_block(participant: str, condition: str, metric: str,
         lines.append("WAIT:(TIME = 4)")
     
     # Add pattern blocks with feedback after each (for non-Baseline)
-    for token in parse_pattern_tokens(sequence):
-        block = PATTERN_BLOCKS.get(token)
-        if block is None:
-            print(f"  WARNING: Unknown pattern key '{token}' in sequence '{sequence}' - skipped.")
-            continue
-        lines.append(f"// --- Pattern Block {token} ---")
-        lines.append(block)
-        
-        # Show task feedback after each pattern block (only for TaskFB condition in non-Baseline phases)
+    for token in split_pattern_units(sequence):
+        append_pattern_unit(lines, token)
+
+        # Show task feedback after each pattern block or explicit mole entry (only for TaskFB condition in non-Baseline phases)
         if not is_baseline and condition == "TaskFB":
             lines.append("FEEDBACK:(TIME = 3)")
             lines.append("WAIT:(TIME = 3)")  # 3 seconds for task feedback animation to complete
@@ -209,9 +274,10 @@ def build_no_feedback_block(participant: str, condition: str, metric: str, seque
     """Returns a post-instructed phase with no performance feedback."""
     phase_label = phase_label or "NoFeedback"
     segment_id = generate_segment_id(participant, condition, metric, "NoFeedback")
+    sequence_comment = (sequence or "").replace("\n", " | ").replace(";", " | ").strip() or "None"
 
     lines = [
-        f"// ============ Phase: {phase_label} (sequence: {sequence}) ============",
+        f"// ============ Phase: {phase_label} (sequence: {sequence_comment}) ============",
         f"SEGMENT:(ID = {segment_id}, LABEL = {phase_label})",
         f"MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = {metric}, MOTORSPACEOOBSIGNIFICANT = None)",
         "// --- Calibration Point ---",
@@ -222,13 +288,8 @@ def build_no_feedback_block(participant: str, condition: str, metric: str, seque
         "WAIT:(TIME = 4)",
     ]
 
-    for token in parse_pattern_tokens(sequence):
-        block = PATTERN_BLOCKS.get(token)
-        if block is None:
-            print(f"  WARNING: Unknown pattern key '{token}' in sequence '{sequence}' - skipped.")
-            continue
-        lines.append(f"// --- Pattern Block {token} ---")
-        lines.append(block)
+    for token in split_pattern_units(sequence):
+        append_pattern_unit(lines, token)
 
     lines.append(f"// ============ End of {phase_label} ============")
     lines.append("WAIT:(TIME = 2)")
@@ -238,17 +299,17 @@ def build_no_feedback_block(participant: str, condition: str, metric: str, seque
 
 def derive_no_feedback_sequence(instructed: str) -> str:
     """Create a deterministic fallback NoFeedback sequence different from Instructed."""
-    seq = parse_pattern_tokens(instructed)
+    seq = split_pattern_units(instructed)
     if len(seq) <= 1:
-        return "-".join(seq)
+        return "\n".join(seq)
 
     # Rotate by one as a simple deterministic counterbalance fallback.
     rotated = seq[1:] + seq[:1]
     if rotated != seq:
-        return "-".join(rotated)
+        return "\n".join(rotated)
 
     # If all tokens are identical, there is no distinct permutation.
-    return "-".join(seq)
+    return "\n".join(seq)
 
 
 def build_wampat(participant: str, condition: str, metric: str,

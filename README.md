@@ -22,7 +22,7 @@ The generator implements a within-participant 3×3 factorial design for studying
 - **Feedback Systems**: Three feedback modalities (Operation, Action, Task)
 - **Performance Metrics**: Three measurement types (Time, Distance, MaxSpeed)
 - **Segment Tracking**: Automated ID generation for data analysis (PPCCMMTT encoding)
-- **Pattern Sequences**: Eight predefined half-patterns (A1, A2, B1, B2, C1, C2, D1, D2) with 5 targets each
+- **Pattern Sequences**: Eight predefined half-patterns (A1, A2, B1, B2, C1, C2, D1, D2) with 5 targets each; in combination they were arranged to cover the full 5 rows × 9 columns wall
 
 ## Requirements
 
@@ -108,7 +108,7 @@ Expected columns (0-indexed):
 6: Baseline  | 7: Explore | 8: BestPerf  | 9: Instructed | 10: NoFeedbackInstructed
 ```
 
-Cells 6-10 contain pattern sequences (e.g., "A1-C2", "B1-D2", "A1-B2-C1-D2")
+Cells 6-10 contain pattern sequences (e.g., "A1-C2", "B1-D2", "A1-B2-C1-D2"); the legacy A1..D2 palette was designed so the paired entries covered the full 5×9 wall when combined
 
 ## File Structure
 
