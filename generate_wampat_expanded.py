@@ -140,14 +140,16 @@ def parse_pattern_tokens(sequence: str) -> list:
     return tokens
 
 def build_phase_block(participant: str, condition: str, metric: str,
-                     phase_name: str, sequence: str, is_baseline: bool = False) -> str:
+                     phase_name: str, sequence: str, is_baseline: bool = False,
+                     phase_label: str | None = None) -> str:
     """Returns the WAMPAT text for one phase (e.g. Baseline with sequence 'A1-C2')."""
+    phase_label = phase_label or phase_name
     segment_id = generate_segment_id(participant, condition, metric, phase_name)
     feedback_type = FEEDBACK_TYPE_MAP.get(condition, "Operation")
     
     lines = [
-        f"// ============ Phase: {phase_name} (sequence: {sequence}) ============",
-        f"SEGMENT:(ID = {segment_id}, LABEL = {phase_name})",
+        f"// ============ Phase: {phase_label} (sequence: {sequence}) ============",
+        f"SEGMENT:(ID = {segment_id}, LABEL = {phase_label})",
     ]
         # Set performance feedback and judgement parameters per phase
     if is_baseline:
@@ -197,18 +199,20 @@ def build_phase_block(participant: str, condition: str, metric: str,
     if is_baseline:
         lines.append("CALIBRATION:(TYPE=PERFORMANCE, STATE=END)")
     
-    lines.append(f"// ============ End of {phase_name} ============")
+    lines.append(f"// ============ End of {phase_label} ============")
     lines.append("WAIT:(TIME = 2)")
     return "\n".join(lines)
 
 
-def build_no_feedback_block(participant: str, condition: str, metric: str, sequence: str) -> str:
+def build_no_feedback_block(participant: str, condition: str, metric: str, sequence: str,
+                           phase_label: str | None = None) -> str:
     """Returns a post-instructed phase with no performance feedback."""
+    phase_label = phase_label or "NoFeedback"
     segment_id = generate_segment_id(participant, condition, metric, "NoFeedback")
 
     lines = [
-        f"// ============ Phase: NoFeedback (sequence: {sequence}) ============",
-        f"SEGMENT:(ID = {segment_id}, LABEL = NoFeedback)",
+        f"// ============ Phase: {phase_label} (sequence: {sequence}) ============",
+        f"SEGMENT:(ID = {segment_id}, LABEL = {phase_label})",
         f"MODIFIER:(PERFORMANCEFEEDBACK = None, JUDGEMENT = {metric}, MOTORSPACEOOBSIGNIFICANT = None)",
         "// --- Calibration Point ---",
         f"SEGMENT:(ID = {segment_id}99, LABEL = Calibration_Point)",
@@ -226,7 +230,7 @@ def build_no_feedback_block(participant: str, condition: str, metric: str, seque
         lines.append(f"// --- Pattern Block {token} ---")
         lines.append(block)
 
-    lines.append("// ============ End of NoFeedback ============")
+    lines.append(f"// ============ End of {phase_label} ============")
     lines.append("WAIT:(TIME = 2)")
 
     return "\n".join(lines)
@@ -249,10 +253,17 @@ def derive_no_feedback_sequence(instructed: str) -> str:
 
 def build_wampat(participant: str, condition: str, metric: str,
                  baseline: str, explore: str, best_perf: str,
-                 instructed: str, no_feedback_instructed: str) -> str:
+                 instructed: str, no_feedback_instructed: str,
+                 phase_labels: dict | None = None) -> str:
     """Returns the full content of one .wampat file."""
+    phase_labels = phase_labels or {}
     # Generate initial segment ID for this participant/condition/metric combo
     init_segment_id = generate_segment_id(participant, condition, metric, "Baseline")
+    baseline_label = phase_labels.get("Baseline", "Baseline")
+    explore_label = phase_labels.get("Explore", "Explore")
+    best_perf_label = phase_labels.get("BestPerf", "BestPerf")
+    instructed_label = phase_labels.get("Instructed", "Instructed")
+    no_feedback_label = phase_labels.get("NoFeedback", "NoFeedback")
     
     sections = [
         f"// ========================================",
@@ -271,15 +282,15 @@ def build_wampat(participant: str, condition: str, metric: str,
         "",
         f"// --- Study condition: {condition} | Metric: {metric} ---",
         "",
-        build_phase_block(participant, condition, metric, "Baseline", baseline, is_baseline=True),
+        build_phase_block(participant, condition, metric, "Baseline", baseline, is_baseline=True, phase_label=baseline_label),
         "",
-        build_phase_block(participant, condition, metric, "Explore", explore, is_baseline=False),
+        build_phase_block(participant, condition, metric, "Explore", explore, is_baseline=False, phase_label=explore_label),
         "",
-        build_phase_block(participant, condition, metric, "BestPerf", best_perf, is_baseline=False),
+        build_phase_block(participant, condition, metric, "BestPerf", best_perf, is_baseline=False, phase_label=best_perf_label),
         "",
-        build_phase_block(participant, condition, metric, "Instructed", instructed, is_baseline=False),
+        build_phase_block(participant, condition, metric, "Instructed", instructed, is_baseline=False, phase_label=instructed_label),
         "",
-        build_no_feedback_block(participant, condition, metric, no_feedback_instructed),
+        build_no_feedback_block(participant, condition, metric, no_feedback_instructed, phase_label=no_feedback_label),
         "",
         "MESSAGE:(LABEL = Session_Complete, TIME = 3)",
         "WAIT:(TIME = 5)",

@@ -56,6 +56,11 @@ The generator implements a within-participant 3×3 factorial design for studying
 run.bat
 ```
 
+**Unity-aware pattern builder:**
+```bash
+run_pattern_builder.bat
+```
+
 **Cross-platform:**
 ```bash
 python generate_wampat_expanded.py
@@ -66,6 +71,12 @@ Then:
 2. Choose output directory (default: `generated_wampat/`)
 3. Click "Generate .wampat files"
 4. Review the log output for confirmation
+
+The dedicated builder GUI can also scan a Unity `Assets/Scripts/Patterns` folder,
+report the pattern-related actions it finds, and let you drag pattern tokens into
+the five study phases before exporting a `.wampat` file. It also shows the Unity
+reader's `KEY:(properties)` statement style so the generated text stays aligned
+with the brittle parser contract.
 
 ### Command Line Mode
 
