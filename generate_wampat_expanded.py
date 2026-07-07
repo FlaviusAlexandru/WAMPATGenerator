@@ -45,6 +45,7 @@ WALL_CONFIG = (
 DEFAULT_MOLE_TYPE = "SimpleTarget"
 DEFAULT_MOLE_POSITION = (5, 3)
 DEFAULT_MOLE_LIFETIME = 5
+DEFAULT_MOLE_VALIDATION = ""
 
 DEFAULT_MODIFIER = (
     "MODIFIER:(EYEPATCH = None, MIRROR = False, CONTROLLEROFFSET = 0.0, "
@@ -146,11 +147,12 @@ def split_pattern_units(sequence: str) -> list[str]:
 
 
 def format_mole_statement(token: str) -> str:
-    """Build a MOLE statement from an explicit type/position token."""
+    """Build a MOLE statement from an explicit type/position/gesture token."""
     token = token.strip()
     mole_type = DEFAULT_MOLE_TYPE
     x_pos, y_pos = DEFAULT_MOLE_POSITION
     lifetime = DEFAULT_MOLE_LIFETIME
+    validation = DEFAULT_MOLE_VALIDATION
 
     if "@" in token:
         type_part, position_part = token.split("@", 1)
@@ -161,10 +163,13 @@ def format_mole_statement(token: str) -> str:
             y_pos = position_bits[1]
         if len(position_bits) >= 3:
             lifetime = position_bits[2]
+        if len(position_bits) >= 4:
+            validation = position_bits[3]
     elif token:
         mole_type = token
 
-    return f"MOLE:(TYPE = {mole_type}, X = {x_pos}, Y = {y_pos}, LIFETIME = {lifetime})"
+    validation_fragment = f", VALIDATION = {validation}" if validation else ""
+    return f"MOLE:(TYPE = {mole_type}, X = {x_pos}, Y = {y_pos}, LIFETIME = {lifetime}{validation_fragment})"
 
 
 def build_pattern_lines(sequence: str) -> list[str]:

@@ -24,27 +24,43 @@ from generate_wampat_expanded import build_wampat, derive_no_feedback_sequence
 DEFAULT_UNITY_PATTERN_DIR = r"C:\Users\FU05OG\Documents\GitHub\Whack_A_Mole_VR\Assets\Scripts\Patterns"
 DEFAULT_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "generated_wampat")
 
-MOLE_TYPE_OPTIONS = [
-    "SimpleTarget",
-    "BallMole",
-    "DistractorLeft",
-    "DistractorRight",
-    "GestureMole",
-    "Invisible",
-    "BalloonMole",
-    "WaspMole",
-    "KeyMole",
-    "CountdownMole",
-]
-DEFAULT_MOLE_TYPE = MOLE_TYPE_OPTIONS[0]
+MOLE_TYPE_GROUPS = {
+    "Normal Pointer": [
+        "SimpleTarget",
+        "DistractorLeft",
+        "DistractorRight",
+        "GestureMole",
+        "Invisible",
+    ],
+    "EMG Hand": [
+        "BallMole",
+        "BalloonMole",
+        "WaspMole",
+        "KeyMole",
+        "CountdownMole",
+    ],
+}
+MOLE_TYPE_OPTIONS = [mole_type for group in MOLE_TYPE_GROUPS.values() for mole_type in group]
+DEFAULT_MOLE_TYPE = MOLE_TYPE_GROUPS["Normal Pointer"][0]
 DEFAULT_MOLE_X = "5"
 DEFAULT_MOLE_Y = "3"
 DEFAULT_MOLE_LIFETIME = "5"
+DEFAULT_MOLE_VALIDATION = ""
+DEFAULT_GESTURE_OPTIONS = [
+    "Neutral",
+    "PalmarGrasp",
+    "OpenHand",
+    "WristExtension",
+    "WristFlexion",
+    "LateralGrasp",
+    "Unknown",
+]
 PHASE_KEYS = ["Baseline", "Explore", "BestPerf", "Instructed", "NoFeedback"]
 VALID_CONDITIONS = ["OperationFB", "ActionFB", "TaskFB"]
 VALID_METRICS = ["Time", "Distance", "MaxSpeed"]
 UNITY_STATEMENT_TEMPLATES = [
     "MOLE:(TYPE = SimpleTarget, X = 5, Y = 3, LIFETIME = 5)",
+    "MOLE:(TYPE = BallMole, X = 5, Y = 3, LIFETIME = 5, VALIDATION = PalmarGrasp)",
     "WAIT:(HIT)",
     "WAIT:(TIME = 3)",
     "SEGMENT:(ID = 01103300, LABEL = Baseline)",
@@ -56,15 +72,36 @@ UNITY_STATEMENT_TEMPLATES = [
 ACTION_RE = re.compile(r'case\s+"([A-Z][A-Z0-9_]*)"|keyValue\[0\]\s*==\s*"([A-Z][A-Z0-9_]*)"')
 
 
-def format_mole_entry(mole_type: str, x_pos: str = DEFAULT_MOLE_X, y_pos: str = DEFAULT_MOLE_Y, lifetime: str = DEFAULT_MOLE_LIFETIME) -> str:
-    return f"{mole_type}@{x_pos},{y_pos},{lifetime}"
+def _parse_enum_values(source: str, enum_name: str) -> list[str]:
+    match = re.search(rf'enum\s+{re.escape(enum_name)}\s*\{{([^}}]*)\}}', source, re.DOTALL)
+    if not match:
+        return []
+
+    values: list[str] = []
+    for raw_value in match.group(1).split(","):
+        value = raw_value.split("//", 1)[0].split("/*", 1)[0].strip()
+        if not value:
+            continue
+        value = value.split("=", 1)[0].strip()
+        if value:
+            values.append(value)
+
+    return values
 
 
-def parse_mole_entry(entry: str) -> tuple[str, str, str, str]:
+def format_mole_entry(mole_type: str, x_pos: str = DEFAULT_MOLE_X, y_pos: str = DEFAULT_MOLE_Y, lifetime: str = DEFAULT_MOLE_LIFETIME, validation: str = DEFAULT_MOLE_VALIDATION) -> str:
+    bits = [x_pos, y_pos, lifetime]
+    if validation:
+        bits.append(validation)
+    return f"{mole_type}@{','.join(bits)}"
+
+
+def parse_mole_entry(entry: str) -> tuple[str, str, str, str, str]:
     mole_type = DEFAULT_MOLE_TYPE
     x_pos = DEFAULT_MOLE_X
     y_pos = DEFAULT_MOLE_Y
     lifetime = DEFAULT_MOLE_LIFETIME
+    validation = DEFAULT_MOLE_VALIDATION
 
     raw = (entry or "").strip()
     if "@" in raw:
@@ -76,10 +113,12 @@ def parse_mole_entry(entry: str) -> tuple[str, str, str, str]:
             y_pos = position_bits[1]
         if len(position_bits) >= 3:
             lifetime = position_bits[2]
+        if len(position_bits) >= 4:
+            validation = position_bits[3]
     elif raw:
         mole_type = raw
 
-    return mole_type, x_pos, y_pos, lifetime
+    return mole_type, x_pos, y_pos, lifetime, validation
 
 
 @dataclass
@@ -87,6 +126,7 @@ class DetectedSurface:
     pattern_dir: str
     files: list[str]
     actions: list[str]
+    gestures: list[str]
     parser_notes: list[str]
 
 
@@ -98,10 +138,11 @@ def _read_text(path: str) -> str:
 def detect_unity_pattern_surface(pattern_dir: str) -> DetectedSurface:
     files: list[str] = []
     actions: set[str] = set()
+    gestures: list[str] = []
     parser_notes: list[str] = []
 
     if not os.path.isdir(pattern_dir):
-        return DetectedSurface(pattern_dir=pattern_dir, files=[], actions=[], parser_notes=["Pattern folder not found."])
+        return DetectedSurface(pattern_dir=pattern_dir, files=[], actions=[], gestures=DEFAULT_GESTURE_OPTIONS, parser_notes=["Pattern folder not found."])
 
     candidate_files = [
         "PatternInterface.cs",
@@ -135,27 +176,47 @@ def detect_unity_pattern_surface(pattern_dir: str) -> DetectedSurface:
         if filename == "PatternReadWriter.cs" and "TestPatterns" in source:
             parser_notes.append("Pattern files are loaded from persistentDataPath/TestPatterns")
 
+    for root, _, filenames in os.walk(pattern_dir):
+        for filename in filenames:
+            if not filename.endswith(".cs"):
+                continue
+
+            source = _read_text(os.path.join(root, filename))
+            detected_gestures = _parse_enum_values(source, "HandGestureState")
+            if detected_gestures:
+                gestures = detected_gestures
+                parser_notes.append(f"Detected HandGestureState in {filename}.")
+                break
+        if gestures:
+            break
+
     if not files:
         parser_notes.append("No Pattern*.cs files were found in the selected folder.")
+
+    if not gestures:
+        gestures = DEFAULT_GESTURE_OPTIONS
 
     return DetectedSurface(
         pattern_dir=pattern_dir,
         files=sorted(files),
         actions=sorted(actions),
+        gestures=gestures,
         parser_notes=parser_notes,
     )
 
 
 class PhaseEditor(ttk.Frame):
-    def __init__(self, master: tk.Misc, phase_key: str, add_callback):
+    def __init__(self, master: tk.Misc, phase_key: str, add_callback, gesture_values: list[str]):
         super().__init__(master)
         self.phase_key = phase_key
         self.add_callback = add_callback
+        self.gesture_values = list(gesture_values)
         self.label_var = tk.StringVar(value=phase_key)
         self.type_var = tk.StringVar(value=DEFAULT_MOLE_TYPE)
         self.x_var = tk.StringVar(value=DEFAULT_MOLE_X)
         self.y_var = tk.StringVar(value=DEFAULT_MOLE_Y)
         self.lifetime_var = tk.StringVar(value=DEFAULT_MOLE_LIFETIME)
+        self.validation_var = tk.StringVar(value=DEFAULT_MOLE_VALIDATION)
 
         header = ttk.Frame(self)
         header.pack(fill="x", pady=(0, 4))
@@ -189,6 +250,12 @@ class PhaseEditor(ttk.Frame):
         ttk.Label(position_row, text="Lifetime", width=8).pack(side="left", padx=(6, 0))
         ttk.Entry(position_row, textvariable=self.lifetime_var, width=6).pack(side="left")
 
+        validation_row = ttk.Frame(edit_panel)
+        validation_row.pack(fill="x", pady=(4, 0))
+        ttk.Label(validation_row, text="Gesture", width=8).pack(side="left")
+        self.validation_combo = ttk.Combobox(validation_row, textvariable=self.validation_var, values=self.gesture_values, state="readonly")
+        self.validation_combo.pack(side="left", fill="x", expand=True)
+
         ttk.Button(edit_panel, text="Update selected", command=self.update_selected).pack(anchor="w", pady=(4, 0))
 
         buttons = ttk.Frame(self)
@@ -219,6 +286,7 @@ class PhaseEditor(ttk.Frame):
             self.x_var.get().strip() or DEFAULT_MOLE_X,
             self.y_var.get().strip() or DEFAULT_MOLE_Y,
             self.lifetime_var.get().strip() or DEFAULT_MOLE_LIFETIME,
+            self.validation_var.get().strip() or DEFAULT_MOLE_VALIDATION,
         ))
         self.tokens.selection_set(index)
         self.tokens.see(index)
@@ -266,6 +334,10 @@ class PhaseEditor(ttk.Frame):
     def values(self) -> list[str]:
         return list(self.tokens.get(0, "end"))
 
+    def set_validation_options(self, values: list[str]) -> None:
+        self.gesture_values = list(values)
+        self.validation_combo.configure(values=self.gesture_values)
+
     def label(self) -> str:
         value = self.label_var.get().strip()
         return value or self.phase_key
@@ -274,11 +346,12 @@ class PhaseEditor(ttk.Frame):
         selection = self.tokens.curselection()
         if not selection:
             return
-        mole_type, x_pos, y_pos, lifetime = parse_mole_entry(self.tokens.get(selection[0]))
+        mole_type, x_pos, y_pos, lifetime, validation = parse_mole_entry(self.tokens.get(selection[0]))
         self.type_var.set(mole_type)
         self.x_var.set(x_pos)
         self.y_var.set(y_pos)
         self.lifetime_var.set(lifetime)
+        self.validation_var.set(validation)
 
     def _select_last(self) -> None:
         if self.tokens.size() > 0:
@@ -381,25 +454,34 @@ class UnityPatternBuilderApp(tk.Tk):
         self.palette_frame = ttk.Frame(panel)
         self.palette_frame.pack(fill="x")
 
-        for index, token in enumerate(MOLE_TYPE_OPTIONS):
-            button = tk.Label(
-                self.palette_frame,
-                text=token,
-                relief="raised",
-                padx=10,
-                pady=6,
-                bg="#f0f0f0",
-                cursor="hand2",
+        row_index = 0
+        for group_name, group_tokens in MOLE_TYPE_GROUPS.items():
+            ttk.Label(self.palette_frame, text=group_name, font=("Segoe UI", 9, "bold")).grid(
+                row=row_index, column=0, columnspan=2, sticky="w", padx=4, pady=(4, 2)
             )
-            button.grid(row=index // 2, column=index % 2, sticky="ew", padx=4, pady=4)
-            button.bind("<ButtonPress-1>", lambda event, value=token: self._start_drag(event, value))
-            button.bind("<B1-Motion>", self._drag_motion)
-            button.bind("<ButtonRelease-1>", self._end_drag)
+            row_index += 1
+
+            for index, token in enumerate(group_tokens):
+                button = tk.Label(
+                    self.palette_frame,
+                    text=token,
+                    relief="raised",
+                    padx=10,
+                    pady=6,
+                    bg="#f0f0f0",
+                    cursor="hand2",
+                )
+                button.grid(row=row_index + index // 2, column=index % 2, sticky="ew", padx=4, pady=4)
+                button.bind("<ButtonPress-1>", lambda event, value=token: self._start_drag(event, value))
+                button.bind("<B1-Motion>", self._drag_motion)
+                button.bind("<ButtonRelease-1>", self._end_drag)
+
+            row_index += (len(group_tokens) + 1) // 2
 
         self.palette_frame.columnconfigure(0, weight=1)
         self.palette_frame.columnconfigure(1, weight=1)
 
-        hint = ttk.Label(panel, text="Drop a mole type onto a phase card, then edit X/Y to place it on the wall.", wraplength=320)
+        hint = ttk.Label(panel, text="Normal Pointer moles are for the physical controller flow; EMG Hand moles belong to the EMGPointer / AIServerInterface flow. Drop a mole type onto a phase card, then edit X/Y to place it on the wall.", wraplength=320)
         hint.pack(anchor="w", pady=(8, 0))
 
     def _build_statement_panel(self, parent: ttk.Frame) -> None:
@@ -408,7 +490,7 @@ class UnityPatternBuilderApp(tk.Tk):
 
         ttk.Label(
             panel,
-            text="The reader accepts KEY:(properties). MOLE also accepts TYPE so you can choose a mole prefab and position it on the wall.",
+            text="The reader accepts KEY:(properties). MOLE also accepts TYPE so you can choose a mole prefab and position it on the wall; EMG Hand moles can also carry a gesture key in VALIDATION.",
             wraplength=320,
             justify="left",
         ).pack(anchor="w", pady=(0, 8))
@@ -446,7 +528,7 @@ class UnityPatternBuilderApp(tk.Tk):
         panel.pack(fill="both", expand=False)
 
         for phase_key in PHASE_KEYS:
-            editor = PhaseEditor(panel, phase_key, self._rebuild_preview)
+            editor = PhaseEditor(panel, phase_key, self._rebuild_preview, self.detected_surface.gestures)
             editor.pack(fill="x", pady=(0, 10))
             editor.drop_target.bind("<Enter>", lambda event, name=phase_key: self._highlight_phase(name, True))
             editor.drop_target.bind("<Leave>", lambda event, name=phase_key: self._highlight_phase(name, False))
@@ -456,7 +538,7 @@ class UnityPatternBuilderApp(tk.Tk):
         panel = ttk.LabelFrame(parent, text="Live Preview", padding=10)
         panel.pack(fill="both", expand=True, pady=(12, 0))
 
-        ttk.Label(panel, text="Preview uses Unity-style KEY:(properties) lines. Mole entries are exported as TYPE + wall coordinates, and your phase labels stay attached to the segment comments.", wraplength=760, justify="left").pack(anchor="w", pady=(0, 8))
+        ttk.Label(panel, text="Preview uses Unity-style KEY:(properties) lines. Mole entries are exported as TYPE + wall coordinates, and EMG Hand moles can also include a gesture key in VALIDATION; your phase labels stay attached to the segment comments.", wraplength=760, justify="left").pack(anchor="w", pady=(0, 8))
 
         self.preview = scrolledtext.ScrolledText(panel, height=24, wrap="none", font=("Consolas", 9))
         self.preview.pack(fill="both", expand=True)
@@ -504,6 +586,9 @@ class UnityPatternBuilderApp(tk.Tk):
             self.detected_notes_var.set("Notes: " + " | ".join(surface.parser_notes))
         else:
             self.detected_notes_var.set("Notes: none")
+
+        for editor in self.phase_editors.values():
+            editor.set_validation_options(surface.gestures)
 
     def _start_drag(self, event: tk.Event, token: str) -> None:
         self.drag_token = token
@@ -586,16 +671,16 @@ class UnityPatternBuilderApp(tk.Tk):
     def _load_sample_layout(self) -> None:
         sample_layout = {
             "Baseline": [("SimpleTarget", "5", "3"), ("BallMole", "2", "2")],
-            "Explore": [("DistractorLeft", "3", "1"), ("WaspMole", "7", "5")],
-            "BestPerf": [("BalloonMole", "6", "2"), ("KeyMole", "8", "4")],
-            "Instructed": [("GestureMole", "4", "5"), ("CountdownMole", "1", "4")],
-            "NoFeedback": [("Invisible", "6", "1"), ("DistractorRight", "7", "2")],
+            "Explore": [("DistractorLeft", "3", "1", ""), ("WaspMole", "7", "5", "WristFlexion")],
+            "BestPerf": [("BalloonMole", "6", "2", "OpenHand"), ("KeyMole", "8", "4", "PalmarGrasp")],
+            "Instructed": [("GestureMole", "4", "5", ""), ("CountdownMole", "1", "4", "LateralGrasp")],
+            "NoFeedback": [("Invisible", "6", "1", ""), ("DistractorRight", "7", "2", "")],
         }
         for phase_name, tokens in sample_layout.items():
             editor = self.phase_editors[phase_name]
             editor.clear()
-            for mole_type, x_pos, y_pos in tokens:
-                editor.tokens.insert("end", format_mole_entry(mole_type, x_pos, y_pos))
+            for entry in tokens:
+                editor.tokens.insert("end", format_mole_entry(*entry))
             editor._select_last()
             editor._load_selected_entry()
         self.phase_editors["Baseline"].label_var.set("Baseline")
